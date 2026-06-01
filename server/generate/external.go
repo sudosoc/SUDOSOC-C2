@@ -1,0 +1,71 @@
+package generate
+
+/*
+	SUDOSOC-C2 Framework
+	Copyright (C) 2022  Seif
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+import (
+	"github.com/sudosoc/SUDOSOC-C2/protobuf/clientpb"
+	"github.com/sudosoc/SUDOSOC-C2/server/db"
+	"github.com/sudosoc/SUDOSOC-C2/server/db/models"
+)
+
+// SliverExternal - Generates the cryptographic keys for the implant but compiles no code
+func SliverExternal(name string, config *clientpb.ImplantConfig) (*clientpb.ExternalImplantConfig, error) {
+	config.IncludeMTLS = config.IncludeMTLS || models.IsC2Enabled([]string{"mtls"}, config.C2)
+	config.IncludeWG = config.IncludeWG || models.IsC2Enabled([]string{"wg"}, config.C2)
+	config.IncludeHTTP = config.IncludeHTTP || models.IsC2Enabled([]string{"http", "https"}, config.C2)
+	config.IncludeDNS = config.IncludeDNS || models.IsC2Enabled([]string{"dns"}, config.C2)
+	config.IncludeNamePipe = config.IncludeNamePipe || models.IsC2Enabled([]string{"namedpipe"}, config.C2)
+	config.IncludeTCP = config.IncludeTCP || models.IsC2Enabled([]string{"tcppivot"}, config.C2)
+
+	// set file extension for external builds
+	if config.IsSharedLib {
+		switch config.GOOS {
+		case WINDOWS:
+			config.Extension = ".dll"
+		case DARWIN:
+			config.Extension = ".dylib"
+		case LINUX:
+			config.Extension = ".so"
+		}
+	} else {
+		if config.GOOS == WINDOWS {
+			config.Extension = ".exe"
+		}
+	}
+
+	build, err := GenerateConfig(name, config)
+	if err != nil {
+		return nil, err
+	}
+	config, err = db.SaveImplantConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	build.ImplantConfigID = config.ID
+	implantBuild, err := db.SaveImplantBuild(build)
+	if err != nil {
+		return nil, err
+	}
+
+	return &clientpb.ExternalImplantConfig{
+		Config: config,
+		Build:  implantBuild,
+	}, nil
+}
