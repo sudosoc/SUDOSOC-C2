@@ -306,4 +306,12 @@ service CoreRPC {
 
   // *** Events ***
   rpc Events(commonpb.Empty) returns (stream clientpb.Event);
+
+  // ══════════════════════════════════════════════════════════════
+  // *** Android — Phantom Mobile Engine ***
+  // ══════════════════════════════════════════════════════════════
+  rpc AndroidDeviceInfo(sudosocpb.AndroidDeviceInfoReq) returns (sudosocpb.AndroidDeviceInfo);
+  rpc AndroidApps(sudosocpb.AndroidAppsReq)             returns (sudosocpb.AndroidApps);
+  rpc AndroidGeneric(sudosocpb.AndroidGenericReq)       returns (sudosocpb.AndroidGenericResp);
+  rpc AndroidRootShell(sudosocpb.AndroidRootShellReq)   returns (sudosocpb.AndroidRootShellResp);
 }

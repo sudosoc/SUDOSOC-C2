@@ -1397,3 +1397,61 @@ message StartServiceByNameReq {
 
   commonpb.Request Request = 9;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Android Messages — SUDOSOC-C2 Phantom Android Engine
+// ═══════════════════════════════════════════════════════════════════
+
+message AndroidDeviceInfoReq {
+  commonpb.Request Request = 9;
+}
+
+message AndroidDeviceInfo {
+  string Manufacturer  = 1;
+  string Model         = 2;
+  string AndroidVer    = 3;
+  string SdkVersion    = 4;
+  string Hostname      = 5;
+  string Username      = 6;
+  string Arch          = 7;
+  bool   IsRooted      = 8;
+  string BuildId       = 10;
+  string Fingerprint   = 11;
+  string SerialNumber  = 12;
+  commonpb.Response Response = 9;
+}
+
+message AndroidAppsReq {
+  commonpb.Request Request = 9;
+}
+
+message AndroidApp {
+  string PackageName = 1;
+  string ApkPath     = 2;
+}
+
+message AndroidApps {
+  repeated AndroidApp Apps = 1;
+  commonpb.Response Response = 9;
+}
+
+message AndroidGenericReq {
+  uint32 MsgType = 1;
+  commonpb.Request Request = 9;
+}
+
+message AndroidGenericResp {
+  string Data = 1;
+  commonpb.Response Response = 9;
+}
+
+message AndroidRootShellReq {
+  string Command = 1;
+  commonpb.Request Request = 9;
+}
+
+message AndroidRootShellResp {
+  string Output = 1;
+  int32  Status = 2;
+  commonpb.Response Response = 9;
+}

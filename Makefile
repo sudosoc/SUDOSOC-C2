@@ -123,6 +123,50 @@ windows-amd64: clean .downloaded_assets validate-go-version
 	GOOS=windows GOARCH=amd64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX).exe ./server
 	GOOS=windows GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX).exe ./client
 
+# ─── Android Targets ──────────────────────────────────────────────────────────
+
+.PHONY: android-arm64
+## Build Android ARM64 implant (most modern Android devices)
+android-arm64: validate-go-version
+	GOOS=android GOARCH=arm64 CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath \
+		-tags "android" \
+		$(LDFLAGS) \
+		-o phantom_android_arm64 \
+		./implant
+	@echo "[*] Android ARM64 implant: phantom_android_arm64"
+	@echo "[*] Deploy: adb push phantom_android_arm64 /data/local/tmp/ && adb shell chmod +x /data/local/tmp/phantom_android_arm64"
+
+.PHONY: android-arm
+## Build Android ARM implant (older Android devices)
+android-arm: validate-go-version
+	GOOS=android GOARCH=arm CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath \
+		-tags "android" \
+		$(LDFLAGS) \
+		-o phantom_android_arm \
+		./implant
+	@echo "[*] Android ARM implant: phantom_android_arm"
+
+.PHONY: android-amd64
+## Build Android x86_64 implant (emulators)
+android-amd64: validate-go-version
+	GOOS=android GOARCH=amd64 CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath \
+		-tags "android" \
+		$(LDFLAGS) \
+		-o phantom_android_amd64 \
+		./implant
+	@echo "[*] Android x86_64 implant (emulator): phantom_android_amd64"
+
+.PHONY: android-all
+## Build all Android implant variants
+android-all: android-arm64 android-arm android-amd64
+	@echo "[*] All Android implants built"
+
+.PHONY: android-apk
+## Package Android implant into APK
+android-apk: android-arm64
+	@bash build/android/build_apk.sh phantom_android_arm64
+	@echo "[*] APK built: phantom_android.apk"
+
 .PHONY: clients
 clients: clean .downloaded_assets validate-go-version
 	GOOS=darwin GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client_macos-amd64$(ARTIFACT_SUFFIX) ./client

@@ -50,7 +50,10 @@
       "Bash(grep -v \"//.*Sliver app dir\")",
       "Bash(grep -v \"//.*Sliver chunk\\\\|//.*Sliver traffic\\\\|//.*Sliver implant\\\\|comment\\\\|// \")",
       "Bash(python3 -c ' *)",
-      "Bash(git -c user.name=\"sudosoc\" -c user.email=\"sudosoc@sudosoc.com\" commit -m \"docs: comprehensive README + final identity cleanup\")"
+      "Bash(git -c user.name=\"sudosoc\" -c user.email=\"sudosoc@sudosoc.com\" commit -m \"docs: comprehensive README + final identity cleanup\")",
+      "Bash(grep -n \"^//go:build\\\\|^// +build\" implant/sliver/handlers/handlers_linux.go)",
+      "Bash(go list *)",
+      "Bash(grep -rn \"^//go:build\\\\|^// +build\" implant/sliver/handlers/rpc-handlers_linux.go)"
     ]
   }
 }

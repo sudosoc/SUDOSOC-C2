@@ -65,6 +65,10 @@ var (
 		"linux/arm64":   true,
 		"windows/386":   true,
 		"windows/amd64": true,
+		// Android targets
+		"android/arm64": true,
+		"android/arm":   true,
+		"android/amd64": true,
 	}
 )
 
@@ -79,6 +83,9 @@ const (
 
 	// LINUX OS
 	LINUX = "linux"
+
+	// ANDROID OS
+	ANDROID = "android"
 
 	clientsDirName = "clients"
 	sliversDirName = "slivers"
