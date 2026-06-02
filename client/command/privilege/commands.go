@@ -222,9 +222,8 @@ REQUIREMENTS
 	})
 
 	byovdDriversCmd := &cobra.Command{
-		Use:     consts.BYOVDDriversStr,
-		Short:   "List built-in vulnerable driver catalogue",
-		GroupID: consts.PrivilegesHelpGroup,
+		Use:   consts.BYOVDDriversStr,
+		Short: "List built-in vulnerable driver catalogue",
 		Run: func(cmd *cobra.Command, args []string) {
 			BYOVDListDriversCmd(cmd, con, args)
 		},

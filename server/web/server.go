@@ -19,7 +19,9 @@ package web
 */
 
 import (
+	"fmt"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -32,9 +34,10 @@ func buildRouter() *mux.Router {
 
 	// ── REST API ──────────────────────────────────────────────────────────
 	api := r.PathPrefix("/api").Subrouter()
+	api.Use(recoveryMiddleware)
 	api.Use(corsMiddleware)
 	api.Use(jsonMiddleware)
-	api.Use(requestTimeoutMiddleware) // 30-second max per API call
+	api.Use(requestTimeoutMiddleware)
 
 	api.HandleFunc("/stats", handleStats).Methods(http.MethodGet)
 	api.HandleFunc("/sessions", handleSessions).Methods(http.MethodGet)
@@ -51,7 +54,7 @@ func buildRouter() *mux.Router {
 	// ── Static SPA (React) ────────────────────────────────────────────────
 	// The embedded FS is served from static.go; unknown routes fall back to
 	// index.html so the React router handles deep links.
-	r.PathPrefix("/").HandlerFunc(serveSPA)
+	r.PathPrefix("/").Handler(recoveryMiddleware(http.HandlerFunc(serveSPA)))
 
 	return r
 }
@@ -74,6 +77,22 @@ func corsMiddleware(next http.Handler) http.Handler {
 func jsonMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// recoveryMiddleware catches panics in HTTP handlers and returns a 500 instead
+// of resetting the connection (which shows as "Connection reset by peer" in curl).
+func recoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				fmt.Printf("[web] panic in handler %s: %v\n%s\n", r.URL.Path, rec, debug.Stack())
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = fmt.Fprintf(w, `{"error":"internal server error","detail":"%v"}`, rec)
+			}
+		}()
 		next.ServeHTTP(w, r)
 	})
 }

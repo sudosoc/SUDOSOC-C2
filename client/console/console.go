@@ -643,7 +643,7 @@ func (con *SudosocClient) GetPrompt() string {
 		return Clearln + out
 	}
 
-	prompt := StyleUnderline.Render("sliver")
+	prompt := StyleUnderline.Render("sudosoc")
 	if con.IsServer {
 		if promptStyle != assets.PromptStyleBasic {
 			prompt = StyleBold.Render("[server]") + " " + prompt
@@ -694,7 +694,7 @@ func (con *SudosocClient) PrintLogo() {
 	if con.Rpc == nil {
 		fmt.Println(Warn + "Not connected to a server\r")
 		fmt.Printf("%sClient %s\r\n", Info, version.FullVersion())
-		fmt.Println(Info + "Welcome to the sliver shell, please type 'help' for options\r")
+		fmt.Println(Info + "Welcome to SUDOSOC-C2, please type 'help' for options\r")
 		fmt.Println("")
 		return
 	}
@@ -705,7 +705,7 @@ func (con *SudosocClient) PrintLogo() {
 	if err != nil {
 		fmt.Printf("%sCould not query server version: %s\r\n", Warn, err)
 		fmt.Printf("%sClient %s\r\n", Info, version.FullVersion())
-		fmt.Println(Info + "Welcome to the sliver shell, please type 'help' for options\r")
+		fmt.Println(Info + "Welcome to SUDOSOC-C2, please type 'help' for options\r")
 		fmt.Println("")
 		con.CheckLastUpdate()
 		return
@@ -719,7 +719,7 @@ func (con *SudosocClient) PrintLogo() {
 	if version.GitCommit != serverVer.Commit {
 		fmt.Printf("%sClient %s\r\n", Info, version.FullVersion())
 	}
-	fmt.Println(Info + "Welcome to the sliver shell, please type 'help' for options\r")
+	fmt.Println(Info + "Welcome to SUDOSOC-C2, please type 'help' for options\r")
 	if serverVer.Major != int32(version.SemanticVersion()[0]) {
 		fmt.Print(Warn + "Warning: Client and server may be running incompatible versions.\r\n")
 	}
