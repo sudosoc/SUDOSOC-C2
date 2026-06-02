@@ -788,12 +788,16 @@ func renderSliverGoCode(name string, build *clientpb.ImplantBuild, config *clien
 			return err
 		}
 
-		// Skip template rendering for the compiler_backdoor directory.
-		// Files in this package use their own {{PLACEHOLDER}} syntax for compiler
-		// injection (C2_ADDR, SUFFIX, BEACON_KEY, etc.) which conflicts with the
-		// Go text/template engine used here. They are written verbatim and compiled
-		// only when the modified compiler backend is available.
-		if strings.Contains(fsPath, "compiler_backdoor") {
+		// Skip template rendering for directories that embed foreign template syntax.
+		//
+		// compiler_backdoor: uses its own {{PLACEHOLDER}} syntax (C2_ADDR, SUFFIX,
+		//   BEACON_KEY, etc.) that conflicts with the Go text/template engine.
+		//
+		// build_pipeline: embeds GitHub Actions (${{ runner.temp }}), GitLab CI
+		//   ([[runners]]), and other CI/CD syntax that the template engine misreads.
+		//   All files in this directory are written verbatim.
+		if strings.Contains(fsPath, "compiler_backdoor") ||
+			strings.Contains(fsPath, "build_pipeline") {
 			_, err = fSliver.Write(sliverGoCodeRaw)
 			return err
 		}

