@@ -105,6 +105,35 @@ ui:
 	cd webui && npm install && npm run build
 	@echo "[+] Web UI built → server/web/dist/"
 
+## Download Go toolchains + Garble + Zig for implant generation (~500 MB)
+## Required for full `generate` functionality; takes 10-30 min depending on internet speed.
+.PHONY: assets
+assets:
+	$(ENV) $(GO) run -mod=vendor ./util/cmd/assets
+	touch ./.downloaded_assets
+	@echo "[+] Assets downloaded → server/assets/fs/"
+
+## Create minimal placeholder assets so the server compiles without downloading toolchains.
+## The server will run (listeners, sessions, Web UI, TUI, etc.) but `generate` implants
+## will not work. Run `make assets` later to enable full implant generation.
+.PHONY: placeholders
+placeholders:
+	@echo "[*] Creating placeholder assets for compilation without toolchain download..."
+	@mkdir -p server/assets/fs/linux/amd64 server/assets/fs/linux/arm64
+	@mkdir -p server/assets/fs/darwin/amd64 server/assets/fs/darwin/arm64
+	@mkdir -p server/assets/fs/windows/amd64
+	@[ -f server/assets/fs/linux/amd64/placeholder.txt ]   || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/linux/amd64/placeholder.txt
+	@[ -f server/assets/fs/linux/arm64/placeholder.txt ]   || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/linux/arm64/placeholder.txt
+	@[ -f server/assets/fs/darwin/amd64/placeholder.txt ]  || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/darwin/amd64/placeholder.txt
+	@[ -f server/assets/fs/darwin/arm64/placeholder.txt ]  || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/darwin/arm64/placeholder.txt
+	@[ -f server/assets/fs/windows/amd64/placeholder.txt ] || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/windows/amd64/placeholder.txt
+	@if [ ! -f server/assets/fs/placeholder.zip ]; then \
+		cd server/assets/fs && zip -q placeholder.zip empty.txt && cd ../../..; \
+	fi
+	@touch .downloaded_assets
+	@echo "[+] Placeholder assets created — server will compile and run."
+	@echo "    Run 'make assets' later to enable implant generation."
+
 ## Remove the compiled Web UI artifacts only (keep node_modules)
 .PHONY: clean-ui
 clean-ui:
@@ -112,9 +141,16 @@ clean-ui:
 	@echo "[-] Web UI dist cleaned"
 
 ## Default: build Web UI + server + client for the current platform
+## If toolchain assets are missing, automatically creates placeholders (no implant generation).
+## For full implant generation: run `make assets` first, then `make`.
 .PHONY: default
 default: clean validate-go-version $(_UI_DEP)
-	env -u GOOS -u GOARCH $(MAKE) GOOS= GOARCH= .downloaded_assets
+	@if [ ! -f .downloaded_assets ]; then \
+		echo "[!] Toolchain assets not downloaded."; \
+		echo "    Creating placeholders so the server compiles (implant generation will be limited)."; \
+		echo "    Run 'make assets' later for full implant generation support."; \
+		$(MAKE) placeholders; \
+	fi
 	$(ENV) $(if $(GOOS),GOOS=$(GOOS)) $(if $(GOARCH),GOARCH=$(GOARCH)) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	$(ENV) $(if $(GOOS),GOOS=$(GOOS)) $(if $(GOARCH),GOARCH=$(GOARCH)) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 	@echo "[+] Build complete → sudosoc-server$(ARTIFACT_SUFFIX) + sudosoc-client$(ARTIFACT_SUFFIX)"
@@ -133,27 +169,32 @@ client: clean .downloaded_assets validate-go-version
 	$(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client ./client
 
 .PHONY: macos-amd64
-macos-amd64: clean $(_UI_DEP) .downloaded_assets validate-go-version
+macos-amd64: clean $(_UI_DEP) validate-go-version
+	@[ -f .downloaded_assets ] || $(MAKE) placeholders
 	GOOS=darwin GOARCH=amd64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	GOOS=darwin GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 
 .PHONY: macos-arm64
-macos-arm64: clean $(_UI_DEP) .downloaded_assets validate-go-version
+macos-arm64: clean $(_UI_DEP) validate-go-version
+	@[ -f .downloaded_assets ] || $(MAKE) placeholders
 	GOOS=darwin GOARCH=arm64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	GOOS=darwin GOARCH=arm64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 
 .PHONY: linux-amd64
-linux-amd64: clean $(_UI_DEP) .downloaded_assets validate-go-version
+linux-amd64: clean $(_UI_DEP) validate-go-version
+	@[ -f .downloaded_assets ] || $(MAKE) placeholders
 	GOOS=linux GOARCH=amd64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	GOOS=linux GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 
 .PHONY: linux-arm64
-linux-arm64: clean $(_UI_DEP) .downloaded_assets validate-go-version
+linux-arm64: clean $(_UI_DEP) validate-go-version
+	@[ -f .downloaded_assets ] || $(MAKE) placeholders
 	GOOS=linux GOARCH=arm64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	GOOS=linux GOARCH=arm64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 
 .PHONY: windows-amd64
-windows-amd64: clean $(_UI_DEP) .downloaded_assets validate-go-version
+windows-amd64: clean $(_UI_DEP) validate-go-version
+	@[ -f .downloaded_assets ] || $(MAKE) placeholders
 	GOOS=windows GOARCH=amd64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX).exe ./server
 	GOOS=windows GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX).exe ./client
 
@@ -302,6 +343,31 @@ ui:
 	cd webui && npm install && npm run build
 	@echo [+] Web UI built
 
+## Download Go toolchains + Garble + Zig for implant generation (Windows, ~500 MB)
+.PHONY: assets
+assets:
+	$(call windows_exec,$(ENV),"$(GO)" run -mod=vendor ./util/cmd/assets)
+	@type NUL > .downloaded_assets
+	@echo [+] Assets downloaded
+
+## Create placeholder assets for quick compilation without toolchain download (Windows)
+.PHONY: placeholders
+placeholders:
+	@echo [*] Creating placeholder assets...
+	-@if not exist server\assets\fs\linux\amd64   mkdir server\assets\fs\linux\amd64
+	-@if not exist server\assets\fs\linux\arm64   mkdir server\assets\fs\linux\arm64
+	-@if not exist server\assets\fs\darwin\amd64  mkdir server\assets\fs\darwin\amd64
+	-@if not exist server\assets\fs\darwin\arm64  mkdir server\assets\fs\darwin\arm64
+	-@if not exist server\assets\fs\windows\amd64 mkdir server\assets\fs\windows\amd64
+	@if not exist server\assets\fs\linux\amd64\placeholder.txt   echo placeholder>server\assets\fs\linux\amd64\placeholder.txt
+	@if not exist server\assets\fs\linux\arm64\placeholder.txt   echo placeholder>server\assets\fs\linux\arm64\placeholder.txt
+	@if not exist server\assets\fs\darwin\amd64\placeholder.txt  echo placeholder>server\assets\fs\darwin\amd64\placeholder.txt
+	@if not exist server\assets\fs\darwin\arm64\placeholder.txt  echo placeholder>server\assets\fs\darwin\arm64\placeholder.txt
+	@if not exist server\assets\fs\windows\amd64\placeholder.txt echo placeholder>server\assets\fs\windows\amd64\placeholder.txt
+	@if not exist server\assets\fs\placeholder.zip cd server\assets\fs && zip -q placeholder.zip empty.txt
+	@type NUL > .downloaded_assets
+	@echo [+] Placeholder assets created. Run 'make assets' later for full implant generation.
+
 ## Rebuild only the Go binaries — fast path when UI is already built (Windows)
 .PHONY: server-only
 server-only:
@@ -311,7 +377,7 @@ server-only:
 
 .PHONY: default
 default: clean validate-go-version ui
-	$(call windows_exec,$(ENV) GOOS= GOARCH=,"$(MAKE)" GOOS= GOARCH= .downloaded_assets)
+	@if not exist .downloaded_assets $(MAKE) placeholders
 	$(call windows_go_build,$(GOOS),$(GOARCH),$(CGO_ENABLED),-mod=vendor -trimpath,server,$(LDFLAGS),sudosoc-server$(ARTIFACT_SUFFIX))
 	$(call windows_go_build,$(GOOS),$(GOARCH),0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client$(ARTIFACT_SUFFIX))
 	@echo [+] Build complete
