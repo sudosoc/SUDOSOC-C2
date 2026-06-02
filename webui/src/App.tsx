@@ -8,12 +8,14 @@ import Android    from './components/Android'
 import Generate   from './components/Generate'
 import AI         from './components/AI'
 import Settings   from './components/Settings'
+import NetworkMap from './components/NetworkMap'
+import Reports    from './components/Reports'
 import Terminal   from './components/Terminal'
 import { useEventStream } from './hooks/useWebSocket'
 import type { WSEvent }   from './types'
 import {
   LayoutDashboard, Monitor, Radio, Antenna, Package,
-  Smartphone, Cpu, Bot, Settings2,
+  Smartphone, Cpu, Bot, Settings2, Map, FileText,
   Terminal as TermIcon, Wifi, WifiOff, Loader,
 } from 'lucide-react'
 
@@ -22,19 +24,22 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type TabID =
-  | 'dashboard' | 'sessions' | 'beacons' | 'listeners' | 'loot'
-  | 'android'   | 'generate' | 'ai'      | 'settings'
+  | 'dashboard' | 'sessions' | 'beacons'  | 'android'
+  | 'listeners' | 'loot'     | 'netmap'   | 'generate'
+  | 'reports'   | 'ai'       | 'settings'
 
 const TABS: { id: TabID; label: string; icon: React.ElementType; color: string }[] = [
-  { id: 'dashboard', label: 'Dashboard',  icon: LayoutDashboard, color: '#00ff88' },
-  { id: 'sessions',  label: 'Sessions',   icon: Monitor,          color: '#00ff88' },
-  { id: 'beacons',   label: 'Beacons',    icon: Radio,            color: '#00d4ff' },
-  { id: 'android',   label: 'Android',    icon: Smartphone,       color: '#00ff88' },
-  { id: 'listeners', label: 'Listeners',  icon: Antenna,          color: '#ffaa00' },
-  { id: 'loot',      label: 'Loot',       icon: Package,          color: '#aa88ff' },
-  { id: 'generate',  label: 'Generate',   icon: Cpu,              color: '#00d4ff' },
-  { id: 'ai',        label: 'AI Agent',   icon: Bot,              color: '#aa88ff' },
-  { id: 'settings',  label: 'Settings',   icon: Settings2,        color: '#555577' },
+  { id: 'dashboard', label: 'Dashboard',   icon: LayoutDashboard, color: '#00ff88' },
+  { id: 'sessions',  label: 'Sessions',    icon: Monitor,          color: '#00ff88' },
+  { id: 'beacons',   label: 'Beacons',     icon: Radio,            color: '#00d4ff' },
+  { id: 'android',   label: 'Android',     icon: Smartphone,       color: '#00ff88' },
+  { id: 'listeners', label: 'Listeners',   icon: Antenna,          color: '#ffaa00' },
+  { id: 'loot',      label: 'Loot',        icon: Package,          color: '#aa88ff' },
+  { id: 'netmap',    label: 'Network Map', icon: Map,              color: '#00d4ff' },
+  { id: 'generate',  label: 'Generate',    icon: Cpu,              color: '#00d4ff' },
+  { id: 'reports',   label: 'Reports',     icon: FileText,         color: '#aa88ff' },
+  { id: 'ai',        label: 'AI Agent',    icon: Bot,              color: '#aa88ff' },
+  { id: 'settings',  label: 'Settings',    icon: Settings2,        color: '#555577' },
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,7 +154,9 @@ export default function App() {
           {activeTab === 'android'   && <Android   onOpenTerminal={openTerminal} />}
           {activeTab === 'listeners' && <Listeners />}
           {activeTab === 'loot'      && <Loot      />}
+          {activeTab === 'netmap'    && <NetworkMap />}
           {activeTab === 'generate'  && <Generate  />}
+          {activeTab === 'reports'   && <Reports   />}
           {activeTab === 'ai'        && <AI        />}
           {activeTab === 'settings'  && <Settings  />}
         </div>

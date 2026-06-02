@@ -52,8 +52,17 @@ func buildRouter() *mux.Router {
 	api.HandleFunc("/listeners/{id}", handleListenerStop).Methods(http.MethodDelete)
 
 	// ── Session control ────────────────────────────────────────────────
-	api.HandleFunc("/sessions/{id}/kill",    handleSessionKill).Methods(http.MethodDelete)
-	api.HandleFunc("/sessions/{id}/execute", handleSessionExecute).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/kill",       handleSessionKill).Methods(http.MethodDelete)
+	api.HandleFunc("/sessions/{id}/execute",    handleSessionExecute).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/screenshot", handleScreenshot).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/ps",         handlePS).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/ls",         handleLS).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/download",   handleDownload).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/ps/{pid}",   handleTerminateProcess).Methods(http.MethodDelete)
+
+	// ── Beacon control ────────────────────────────────────────────────
+	api.HandleFunc("/beacons/{id}/tasks",   handleBeaconTasks).Methods(http.MethodGet)
+	api.HandleFunc("/beacons/{id}/execute", handleBeaconExecute).Methods(http.MethodPost)
 
 	// ── Generate ──────────────────────────────────────────────────────
 	api.HandleFunc("/generate/options", handleGenerateOptions).Methods(http.MethodGet)
