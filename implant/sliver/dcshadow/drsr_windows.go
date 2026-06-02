@@ -260,8 +260,13 @@ func md4Sum(msg []byte) []byte {
 		}
 		aa, bb, cc, dd := a, b, c, d
 
-		// Round 1.
-		for _, s := range []struct{ i, n uint32 }{{0, 3}, {1, 7}, {2, 11}, {3, 19}} {
+		// Round 1. Named fields avoid double-brace sequences that confuse the
+		// Go template engine during implant generation.
+		type round1step struct{ i, n uint32 }
+		round1 := []round1step{
+			{i: 0, n: 3}, {i: 1, n: 7}, {i: 2, n: 11}, {i: 3, n: 19},
+		}
+		for _, s := range round1 {
 			a = rol(a+f(b, c, d)+X[s.i], uint(s.n))
 			a, b, c, d = d, a, b, c
 		}
