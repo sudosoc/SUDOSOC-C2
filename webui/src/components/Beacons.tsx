@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAPI, apiPost, apiFetch } from '../hooks/useAPI'
 import type { Beacon } from '../types'
-import { Radio, RefreshCw, Send, List, Clock, CheckCircle2, AlertCircle, Loader, ChevronDown, ChevronUp } from 'lucide-react'
+import { Radio, RefreshCw, Send, List, Clock, CheckCircle2, AlertCircle, Loader, ChevronDown, ChevronUp, Eye, X } from 'lucide-react'
 
 interface BeaconTask {
   id:           string
@@ -10,6 +10,11 @@ interface BeaconTask {
   created_at:   number
   sent_at:      number
   completed_at: number
+}
+
+interface BeaconTaskContent extends BeaconTask {
+  output:       string
+  has_response: boolean
 }
 
 interface TaskResult {
@@ -40,12 +45,14 @@ export default function Beacons() {
   const { data, loading, error, refresh } = useAPI<Beacon[]>('/api/beacons', 8_000)
   const beacons = data ?? []
 
-  const [expanded, setExpanded]       = useState<string | null>(null)
-  const [tasks,    setTasks]          = useState<Record<string, BeaconTask[]>>({})
-  const [loadingT, setLoadingT]       = useState<string | null>(null)
-  const [customCmd,setCustomCmd]      = useState<Record<string, string>>({})
-  const [sending,  setSending]        = useState<string | null>(null)
-  const [result,   setResult]         = useState<Record<string, TaskResult | null>>({})
+  const [expanded,   setExpanded]   = useState<string | null>(null)
+  const [tasks,      setTasks]      = useState<Record<string, BeaconTask[]>>({})
+  const [loadingT,   setLoadingT]   = useState<string | null>(null)
+  const [customCmd,  setCustomCmd]  = useState<Record<string, string>>({})
+  const [sending,    setSending]    = useState<string | null>(null)
+  const [result,     setResult]     = useState<Record<string, TaskResult | null>>({})
+  const [taskOutput, setTaskOutput] = useState<BeaconTaskContent | null>(null)
+  const [loadingOut, setLoadingOut] = useState<string | null>(null)
 
   async function expandBeacon(beaconID: string) {
     if (expanded === beaconID) {
@@ -58,6 +65,15 @@ export default function Beacons() {
       setTasks(prev => ({ ...prev, [beaconID]: t }))
     } catch { setTasks(prev => ({ ...prev, [beaconID]: [] })) }
     finally  { setLoadingT(null) }
+  }
+
+  async function viewOutput(beaconID: string, taskID: string) {
+    setLoadingOut(taskID)
+    try {
+      const res = await apiFetch<BeaconTaskContent>(`/api/beacons/${beaconID}/tasks/${taskID}`)
+      setTaskOutput(res)
+    } catch { /* ignore */ }
+    finally { setLoadingOut(null) }
   }
 
   async function queueTask(beaconID: string) {
@@ -216,12 +232,23 @@ export default function Beacons() {
                                     : `Queued ${fmtUnix(t.created_at)}`}
                                 </div>
                               </div>
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded border shrink-0 ${
-                                t.state === 'completed' ? 'border-primary/30 text-primary'
-                                : t.state === 'sent'    ? 'border-accent/30  text-accent'
-                                : t.state === 'failed'  ? 'border-danger/30  text-danger'
-                                :                         'border-warn/30    text-warn'
-                              }`}>{t.state}</span>
+                              <div className="flex items-center gap-1 shrink-0">
+                                {(t.state === 'completed' || t.state === 'sent') && (
+                                  <button onClick={() => viewOutput(b.id, t.id)}
+                                    disabled={loadingOut === t.id}
+                                    className="text-muted hover:text-primary" title="View output">
+                                    {loadingOut === t.id
+                                      ? <Loader size={10} className="animate-spin"/>
+                                      : <Eye size={10}/>}
+                                  </button>
+                                )}
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                                  t.state === 'completed' ? 'border-primary/30 text-primary'
+                                  : t.state === 'sent'    ? 'border-accent/30  text-accent'
+                                  : t.state === 'failed'  ? 'border-danger/30  text-danger'
+                                  :                         'border-warn/30    text-warn'
+                                }`}>{t.state}</span>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -232,6 +259,38 @@ export default function Beacons() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* ── Task Output Modal ─────────────────────────────────────────── */}
+      {taskOutput && (
+        <div className="fixed inset-0 bg-bg/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-surface border border-border rounded-xl shadow-2xl w-full max-w-3xl max-h-[70vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div>
+                <h3 className="text-primary font-semibold text-sm flex items-center gap-2">
+                  <Eye size={13}/> Task Output
+                </h3>
+                <p className="text-muted text-[10px] mt-0.5">{taskOutput.description} · {taskOutput.state}</p>
+              </div>
+              <button onClick={() => setTaskOutput(null)} className="text-muted hover:text-danger"><X size={14}/></button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {taskOutput.output ? (
+                <pre className="text-[11px] font-mono text-text whitespace-pre-wrap break-all bg-bg rounded p-3 border border-border/40">
+                  {taskOutput.output}
+                </pre>
+              ) : taskOutput.has_response ? (
+                <p className="text-muted text-xs italic">Response received but could not be decoded (non-execute task type).</p>
+              ) : (
+                <p className="text-muted text-xs italic">
+                  {taskOutput.state === 'pending'
+                    ? 'Task is still pending — waiting for beacon to check in.'
+                    : 'No output available for this task.'}
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

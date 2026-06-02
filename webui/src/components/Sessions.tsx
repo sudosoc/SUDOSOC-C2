@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useAPI, apiDelete, apiPost, apiFetch } from '../hooks/useAPI'
 import type { Session } from '../types'
 import {
   Monitor, Skull, Terminal, RefreshCw, Send, Copy, CheckCheck,
   List, Camera, FolderOpen, ChevronDown, ChevronUp,
-  X, Download, Loader, Search, SortAsc,
+  X, Download, Upload, Loader, Search,
 } from 'lucide-react'
 
 interface Props {
@@ -79,6 +79,9 @@ export default function Sessions({ onOpenTerminal }: Props) {
   const [fsLoading,  setFsLoading]  = useState<string | null>(null)
   const [fsPath,     setFsPath]     = useState<Record<string, string>>({})
   const [termProc,   setTermProc]   = useState<{ pid: number; session: Session } | null>(null)
+  const [uploading,  setUploading]  = useState(false)
+  const [uploadMsg,  setUploadMsg]  = useState<string | null>(null)
+  const uploadRef = useRef<HTMLInputElement>(null)
 
   async function killSession(id: string) {
     if (!confirm('Kill this session?')) return
@@ -126,6 +129,22 @@ export default function Sessions({ onOpenTerminal }: Props) {
 
   async function downloadFile(s: Session, path: string) {
     window.open(`/api/sessions/${s.id}/download?path=${encodeURIComponent(path)}`, '_blank')
+  }
+
+  async function uploadFile(s: Session, file: File, remotePath: string) {
+    setUploading(true); setUploadMsg(null)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('path', remotePath + '/' + file.name)
+      const res = await fetch(`/api/sessions/${s.id}/upload`, { method: 'POST', body: form })
+      if (!res.ok) throw new Error(await res.text())
+      const json = await res.json() as { path: string; written_files: number }
+      setUploadMsg(`✓ Uploaded to ${json.path}`)
+      openFS(s, remotePath)
+    } catch (e) {
+      setUploadMsg(`✗ ${String(e)}`)
+    } finally { setUploading(false) }
   }
 
   async function killProcess(s: Session, pid: number) {
@@ -416,6 +435,26 @@ export default function Sessions({ onOpenTerminal }: Props) {
                   </span>
                 ))}
               </div>
+            </div>
+
+            {/* Upload bar */}
+            <div className="px-4 py-2 border-b border-border/40 flex items-center gap-2">
+              <input ref={uploadRef} type="file" className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (file) uploadFile(fsModal.session, file, fsModal.ls.path)
+                  if (uploadRef.current) uploadRef.current.value = ''
+                }} />
+              <button onClick={() => uploadRef.current?.click()} disabled={uploading}
+                className="flex items-center gap-1.5 px-3 py-1 rounded text-[10px] border border-warn/30 text-warn hover:bg-warn/10 transition-colors disabled:opacity-40">
+                {uploading ? <Loader size={10} className="animate-spin"/> : <Upload size={10}/>}
+                {uploading ? 'Uploading…' : 'Upload File'}
+              </button>
+              {uploadMsg && (
+                <span className={`text-[10px] ${uploadMsg.startsWith('✓') ? 'text-primary' : 'text-danger'}`}>
+                  {uploadMsg}
+                </span>
+              )}
             </div>
 
             {/* File list */}

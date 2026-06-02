@@ -46,7 +46,7 @@ func buildRouter() *mux.Router {
 	api.HandleFunc("/loot",      handleLoot).Methods(http.MethodGet)
 	api.HandleFunc("/operators", handleOperators).Methods(http.MethodGet)
 
-	// ── Listener control (start / stop) ───────────────────────────────
+	// ── Listener control (start / stop — includes WireGuard) ─────────
 	api.HandleFunc("/listeners",      handleListeners).Methods(http.MethodGet)
 	api.HandleFunc("/listeners",      handleListenerStart).Methods(http.MethodPost)
 	api.HandleFunc("/listeners/{id}", handleListenerStop).Methods(http.MethodDelete)
@@ -58,11 +58,16 @@ func buildRouter() *mux.Router {
 	api.HandleFunc("/sessions/{id}/ps",         handlePS).Methods(http.MethodGet)
 	api.HandleFunc("/sessions/{id}/ls",         handleLS).Methods(http.MethodGet)
 	api.HandleFunc("/sessions/{id}/download",   handleDownload).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/upload",     handleUpload).Methods(http.MethodPost)
 	api.HandleFunc("/sessions/{id}/ps/{pid}",   handleTerminateProcess).Methods(http.MethodDelete)
 
 	// ── Beacon control ────────────────────────────────────────────────
-	api.HandleFunc("/beacons/{id}/tasks",   handleBeaconTasks).Methods(http.MethodGet)
-	api.HandleFunc("/beacons/{id}/execute", handleBeaconExecute).Methods(http.MethodPost)
+	api.HandleFunc("/beacons/{id}/tasks",            handleBeaconTasks).Methods(http.MethodGet)
+	api.HandleFunc("/beacons/{id}/tasks/{taskID}",   handleBeaconTaskContent).Methods(http.MethodGet)
+	api.HandleFunc("/beacons/{id}/execute",          handleBeaconExecute).Methods(http.MethodPost)
+
+	// ── Operator management ───────────────────────────────────────────
+	api.HandleFunc("/operators/new", handleOperatorNew).Methods(http.MethodPost)
 
 	// ── Generate ──────────────────────────────────────────────────────
 	api.HandleFunc("/generate/options", handleGenerateOptions).Methods(http.MethodGet)

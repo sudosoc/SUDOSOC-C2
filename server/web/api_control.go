@@ -17,6 +17,7 @@ import (
 	"github.com/sudosoc/SUDOSOC-C2/protobuf/commonpb"
 	"github.com/sudosoc/SUDOSOC-C2/protobuf/sudosocpb"
 	"github.com/sudosoc/SUDOSOC-C2/server/c2"
+	"github.com/sudosoc/SUDOSOC-C2/server/console"
 	"github.com/sudosoc/SUDOSOC-C2/server/core"
 )
 
@@ -101,9 +102,74 @@ func handleListenerStart(w http.ResponseWriter, r *http.Request) {
 			ID: job.ID, Name: job.Name, Protocol: proto, Port: req.Port,
 		})
 
+	case "wg", "wireguard":
+		// WireGuard uses three separate ports: main, netstack, key-exchange
+		nport := req.Port + 1
+		kport := req.Port + 2
+		job, err := c2.StartWGListenerJob(&clientpb.WGListenerReq{
+			Port:    req.Port,
+			NPort:   uint32(nport),
+			KeyPort: uint32(kport),
+		})
+		if err != nil {
+			jsonError(w, fmt.Sprintf("failed to start WireGuard listener: %v", err), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(listenerStartResp{
+			ID: job.ID, Name: job.Name, Protocol: "wg", Port: req.Port,
+		})
+
 	default:
-		jsonError(w, fmt.Sprintf("unsupported protocol %q (supported: mtls, https, http, dns)", proto), http.StatusBadRequest)
+		jsonError(w, fmt.Sprintf("unsupported protocol %q (supported: mtls, https, http, dns, wg)", proto), http.StatusBadRequest)
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/operators/new  — Generate a new operator config and return as JSON
+// Body: { "name": "seif", "lhost": "192.168.1.50", "lport": 47443 }
+// ─────────────────────────────────────────────────────────────────────────────
+
+type operatorNewReq struct {
+	Name  string `json:"name"`
+	LHost string `json:"lhost"`
+	LPort uint16 `json:"lport"`
+}
+
+type operatorNewResp struct {
+	Name       string `json:"name"`
+	ConfigJSON string `json:"config_json"` // full JSON config the operator should save
+	SavePath   string `json:"save_path"`   // suggested filename
+}
+
+func handleOperatorNew(w http.ResponseWriter, r *http.Request) {
+	var req operatorNewReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		jsonError(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if req.LHost == "" {
+		jsonError(w, "lhost (server address) is required", http.StatusBadRequest)
+		return
+	}
+	if req.LPort == 0 {
+		req.LPort = 47443 // default multiplayer port
+	}
+
+	configJSON, err := console.NewOperatorConfig(req.Name, req.LHost, req.LPort, []string{"all"}, false)
+	if err != nil {
+		jsonError(w, fmt.Sprintf("failed to generate operator config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(operatorNewResp{
+		Name:       req.Name,
+		ConfigJSON: string(configJSON),
+		SavePath:   fmt.Sprintf("%s_%s.cfg", req.Name, req.LHost),
+	})
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
