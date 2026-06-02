@@ -305,9 +305,11 @@ func buildGenerateOptions(os, arch string) generateOptions {
 			OS: os, Arch: arch,
 			Arches: []string{"arm64", "arm", "amd64"},
 			Formats: []optionItem{
-				{Value: "apk",    Label: "APK",    Description: "Android Package (recommended)"},
-				{Value: "shared", Label: "Shared", Description: "Shared library (.so)"},
-				{Value: "exe",    Label: "ELF",    Description: "Raw ELF binary"},
+				// NOTE: 'exe' produces a raw ELF binary for Android (GOOS=android).
+				// APK packaging is a separate step: run 'make android-apk' after generate.
+				// The server-side generate pipeline does not support apk as a direct format.
+				{Value: "exe",    Label: "ELF Binary", Description: "Raw ARM64 ELF — deploy via ADB or shell (recommended)"},
+				{Value: "shared", Label: "Shared .so",  Description: "Shared library — inject into existing Android process"},
 			},
 			Protocols: []optionItem{
 				{Value: "mtls",       Label: "mTLS",          Description: "Mutual TLS — high stealth"},

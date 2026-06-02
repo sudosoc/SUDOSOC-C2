@@ -10,6 +10,14 @@
 # After this script: ./sudosoc-server --ui  →  working binary + browser UI
 # Run `make assets` separately for full implant generation support.
 #
+# ─────────────────────────────────────────────────────────────────────────────
+# IMPORTANT: The implant source is EMBEDDED inside the server binary via
+# //go:embed in implant/implant.go. This means:
+#   - Any change to implant/sliver/** requires 'make server-only' to rebuild
+#   - 'git pull' alone is NOT sufficient for implant source changes
+#   - Always run: git pull && make server-only
+# ─────────────────────────────────────────────────────────────────────────────
+#
 # Usage:
 #   chmod +x fix_proto.sh && ./fix_proto.sh
 # ─────────────────────────────────────────────────────────────────────────────

