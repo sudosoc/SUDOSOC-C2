@@ -99,7 +99,7 @@ var builderCmd = &cobra.Command{
 		if !quiet {
 			log.RootLogger.AddHook(log.NewStdoutHook(log.RootLoggerName))
 		}
-		builderLog.Infof("Initializing Sliver external builder - %s", version.FullVersion())
+		builderLog.Infof("Initializing SUDOSOC-C2 external builder - %s", version.FullVersion())
 
 		level, err := cmd.Flags().GetInt(logLevelFlagStr)
 		if err != nil {

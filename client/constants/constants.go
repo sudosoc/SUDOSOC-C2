@@ -351,11 +351,11 @@ const (
 	PrivilegesHelpGroup = "Privileges"
 	ProcessHelpGroup    = "Process"
 
-	AliasHelpGroup     = "Sliver - 3rd Party macros"
-	ExtensionHelpGroup = "Sliver - 3rd Party extensions"
+	AliasHelpGroup     = "SUDOSOC-C2 - 3rd Party macros"
+	ExtensionHelpGroup = "SUDOSOC-C2 - 3rd Party extensions"
 
 	// Useless.
-	SliverWinHelpGroup   = "Sliver - Windows"
+	SliverWinHelpGroup   = "SUDOSOC-C2 - Windows"
 	MultiplayerHelpGroup = "Multiplayer"
 )
 

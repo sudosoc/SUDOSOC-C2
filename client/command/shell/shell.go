@@ -237,7 +237,7 @@ func ShellKillCmd(cmd *cobra.Command, con *console.SudosocClient, args []string)
 func runInteractive(cmd *cobra.Command, shellPath string, noPty bool, con *console.SudosocClient, existing *managedShell) shellResult {
 	con.Println()
 	con.PrintInfof("Shell management: `shell ls`, `shell attach <id>`\n")
-	con.PrintInfof("Escape: press Ctrl-] to return to the Sliver client\n")
+	con.PrintInfof("Escape: press Ctrl-] to return to the SUDOSOC-C2 client\n")
 
 	session := con.ActiveTarget.GetSession()
 	if session == nil {

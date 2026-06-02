@@ -30,7 +30,7 @@ func DefaultConfig() Config {
 	return Config{
 		Transport:     TransportSSE,
 		ListenAddress: "127.0.0.1:8080",
-		ServerName:    "Sliver MCP",
+		ServerName:    "SUDOSOC-C2 MCP",
 		ServerVersion: version.Version,
 	}
 }

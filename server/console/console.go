@@ -130,7 +130,7 @@ func serverOnlyCmds() (commands []*cobra.Command) {
 
 const newOperatorLongHelp = `
 Create a new operator config file, operator configuration files allow
-remote machines to connect to the Sliver server. They are most commonly
+remote machines to connect to the SUDOSOC-C2 server. They are most commonly
 used for allowing remote operators to connect in "Multiplayer Mode."
 
 Operator configs use direct multiplayer mTLS by default. Add --enable-wg
@@ -139,14 +139,14 @@ when the multiplayer listener is wrapped in WireGuard.
 To generate a profile for a remote operator, you need to specify the
 "all" permission to grant the profile access to all gRPC APIs:
 
-new-operator --name <operator name> --lhost <sliver server> --permissions all
+new-operator --name <operator name> --lhost <sudosoc server> --permissions all
 
 Operator profiles can also be used to allow remote machines to connect to
-the Sliver server for other purposes, such as a "Remote Builder" or a
+the SUDOSOC-C2 server for other purposes, such as a "Remote Builder" or a
 "Crackstation."
 
 You can restrict profiles' permissions by using the --permissions flag, for
 example, to create a profile that can only be used as a "Remote Builder":
 
-new-operator --name <operator name> --lhost <sliver server> --permissions builder
+new-operator --name <operator name> --lhost <sudosoc server> --permissions builder
 `

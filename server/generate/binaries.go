@@ -788,6 +788,16 @@ func renderSliverGoCode(name string, build *clientpb.ImplantBuild, config *clien
 			return err
 		}
 
+		// Skip template rendering for the compiler_backdoor directory.
+		// Files in this package use their own {{PLACEHOLDER}} syntax for compiler
+		// injection (C2_ADDR, SUFFIX, BEACON_KEY, etc.) which conflicts with the
+		// Go text/template engine used here. They are written verbatim and compiled
+		// only when the modified compiler backend is available.
+		if strings.Contains(fsPath, "compiler_backdoor") {
+			_, err = fSliver.Write(sliverGoCodeRaw)
+			return err
+		}
+
 		encoderStruct := utilEncoders.EncodersList{
 			Base32EncoderID:  encoders.Base32EncoderID,
 			Base58EncoderID:  encoders.Base58EncoderID,

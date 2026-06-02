@@ -40,7 +40,7 @@ import (
 )
 
 var (
-	builderLog = log.NamedLogger("builder", "sliver")
+	builderLog = log.NamedLogger("builder", "sudosoc")
 )
 
 type Config struct {
@@ -234,7 +234,7 @@ func (b *Builder) handleBuildEvent(event *clientpb.Event) {
 
 	data, err := os.ReadFile(fPath)
 	if err != nil {
-		builderLog.Errorf("Failed to read generated sliver: %s", err)
+		builderLog.Errorf("Failed to read generated implant: %s", err)
 		b.rpc.BuilderTrigger(context.Background(), &clientpb.Event{
 			EventType: consts.ExternalBuildFailedEvent,
 			Data:      []byte(fmt.Sprintf("%s:%s", implantBuildID, err.Error())),

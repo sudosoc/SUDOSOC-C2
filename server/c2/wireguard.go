@@ -158,10 +158,10 @@ func StartWGListener(port uint16, netstackPort uint16, keyExchangeListenPort uin
 	// Open up c2 commincation listener TCP socket
 	listener, err := tNet.ListenTCP(&net.TCPAddr{IP: net.ParseIP(tunIP), Port: int(netstackPort)})
 	if err != nil {
-		wgLog.Errorf("Failed to setup up wg sliver listener: %v", err)
+		wgLog.Errorf("Failed to setup up wg listener: %v", err)
 		return nil, nil, nil, err
 	}
-	wgLog.Printf("Successfully setup up wg sliver listener")
+	wgLog.Printf("Successfully setup up wg listener")
 	go acceptWGSliverConnections(listener)
 	return listener, dev, wgConf, nil
 }

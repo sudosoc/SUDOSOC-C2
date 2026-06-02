@@ -56,7 +56,7 @@ func Start(host string, port uint16, tailscale bool, enableWG bool) {
 		port = uint16(serverConfig.DaemonConfig.Port)
 	}
 
-	daemonLog.Infof("Starting Sliver daemon %s:%d ...", host, port)
+	daemonLog.Infof("Starting SUDOSOC-C2 daemon %s:%d ...", host, port)
 	if tailscale {
 		_, ln, err = transport.StartTsNetClientListener(host, port)
 	} else if enableWG {

@@ -9,7 +9,7 @@ import (
 )
 
 func formatEvent(event core.Event) (string, string) {
-	subject := fmt.Sprintf("Sliver event: %s", event.EventType)
+	subject := fmt.Sprintf("SUDOSOC-C2 event: %s", event.EventType)
 	lines := []string{
 		fmt.Sprintf("Event: %s", event.EventType),
 	}

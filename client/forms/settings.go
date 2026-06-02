@@ -59,7 +59,7 @@ func SettingsForm(settings *assets.ClientSettings, tableStyleOptions []string) (
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Prompt style").
-				Description("Customize the sliver prompt prefix").
+				Description("Customize the SUDOSOC-C2 prompt prefix").
 				Options(
 					huh.NewOption(assets.PromptStyleHost, assets.PromptStyleHost),
 					huh.NewOption(assets.PromptStyleOperatorHost, assets.PromptStyleOperatorHost),

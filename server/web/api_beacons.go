@@ -9,8 +9,10 @@ package web
 import (
 	"fmt"
 	"strings"
-	"time"
 
+	"google.golang.org/protobuf/proto"
+	"github.com/sudosoc/SUDOSOC-C2/protobuf/commonpb"
+	"github.com/sudosoc/SUDOSOC-C2/protobuf/sudosocpb"
 	"github.com/sudosoc/SUDOSOC-C2/server/db"
 )
 
@@ -36,25 +38,50 @@ func beaconTaskList(beaconID string) ([]beaconTaskJSON, error) {
 	return out, nil
 }
 
-// queueBeaconExecute creates a pending shell-execute task on a beacon.
-// The actual task delivery happens on the beacon's next check-in via
-// the existing beacon task queue mechanism.
+// queueBeaconExecute creates a pending execute task on a beacon and persists it
+// to the database so it will be delivered on the beacon's next check-in.
 func queueBeaconExecute(beaconID string, command string) (map[string]interface{}, error) {
 	args := strings.Fields(command)
 	if len(args) == 0 {
 		return nil, fmt.Errorf("empty command")
 	}
 
-	// Confirm beacon exists
 	beacon, err := db.BeaconByID(beaconID)
 	if err != nil || beacon == nil {
 		return nil, fmt.Errorf("beacon not found: %s", beaconID)
 	}
 
+	execReq := &sudosocpb.ExecuteReq{
+		Path:   args[0],
+		Args:   args[1:],
+		Output: true,
+		Request: &commonpb.Request{
+			BeaconID: beacon.ID.String(),
+		},
+	}
+	reqData, err := proto.Marshal(execReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal execute request: %w", err)
+	}
+
+	task, err := beacon.Task(&sudosocpb.Envelope{
+		Type: sudosocpb.MsgExecuteReq,
+		Data: reqData,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create beacon task: %w", err)
+	}
+	task.Description = fmt.Sprintf("execute: %s", command)
+
+	if err := db.Session().Save(task).Error; err != nil {
+		return nil, fmt.Errorf("failed to save beacon task: %w", err)
+	}
+
 	return map[string]interface{}{
+		"task_id":     task.ID.String(),
 		"state":       "pending",
-		"description": fmt.Sprintf("execute: %s", command),
-		"queued_at":   time.Now().Unix(),
+		"description": task.Description,
+		"queued_at":   task.CreatedAt.Unix(),
 		"message":     fmt.Sprintf("Task queued for %s. Will execute on next check-in (interval: %ds).", beacon.Name, beacon.Interval/1000),
 		"command":     command,
 	}, nil

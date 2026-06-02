@@ -254,7 +254,7 @@ func (con *SudosocClient) setupAsciicastRecord(logFile *os.File, server io.Write
 
 	marker := make([]byte, stdoutSyncMarkerSize)
 	if _, err := rand.Read(marker); err != nil {
-		copy(marker, []byte(fmt.Sprintf("sliver-sync-%d", time.Now().UnixNano())))
+		copy(marker, []byte(fmt.Sprintf("sudosoc-sync-%d", time.Now().UnixNano())))
 	}
 
 	done := make(chan struct{})
