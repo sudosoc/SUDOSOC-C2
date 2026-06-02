@@ -39,13 +39,25 @@ func buildRouter() *mux.Router {
 	api.Use(jsonMiddleware)
 	api.Use(requestTimeoutMiddleware)
 
-	api.HandleFunc("/stats", handleStats).Methods(http.MethodGet)
-	api.HandleFunc("/sessions", handleSessions).Methods(http.MethodGet)
-	api.HandleFunc("/sessions/{id}/kill", handleSessionKill).Methods(http.MethodDelete)
-	api.HandleFunc("/beacons", handleBeacons).Methods(http.MethodGet)
-	api.HandleFunc("/listeners", handleListeners).Methods(http.MethodGet)
-	api.HandleFunc("/loot", handleLoot).Methods(http.MethodGet)
+	// ── Read-only data endpoints ──────────────────────────────────────
+	api.HandleFunc("/stats",     handleStats).Methods(http.MethodGet)
+	api.HandleFunc("/sessions",  handleSessions).Methods(http.MethodGet)
+	api.HandleFunc("/beacons",   handleBeacons).Methods(http.MethodGet)
+	api.HandleFunc("/loot",      handleLoot).Methods(http.MethodGet)
 	api.HandleFunc("/operators", handleOperators).Methods(http.MethodGet)
+
+	// ── Listener control (start / stop) ───────────────────────────────
+	api.HandleFunc("/listeners",      handleListeners).Methods(http.MethodGet)
+	api.HandleFunc("/listeners",      handleListenerStart).Methods(http.MethodPost)
+	api.HandleFunc("/listeners/{id}", handleListenerStop).Methods(http.MethodDelete)
+
+	// ── Session control ────────────────────────────────────────────────
+	api.HandleFunc("/sessions/{id}/kill",    handleSessionKill).Methods(http.MethodDelete)
+	api.HandleFunc("/sessions/{id}/execute", handleSessionExecute).Methods(http.MethodPost)
+
+	// ── Generate ──────────────────────────────────────────────────────
+	api.HandleFunc("/generate/options", handleGenerateOptions).Methods(http.MethodGet)
+	api.HandleFunc("/generate",         handleGenerate).Methods(http.MethodPost)
 
 	// ── WebSocket ─────────────────────────────────────────────────────────
 	r.HandleFunc("/ws/events", handleWSEvents)
