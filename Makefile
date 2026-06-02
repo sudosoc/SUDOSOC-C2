@@ -264,13 +264,29 @@ servers: clean .downloaded_assets validate-go-version
 	GOOS=darwin GOARCH=arm64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server_darwin-arm64$(ARTIFACT_SUFFIX) ./server
 	GOOS=darwin GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server_darwin-amd64$(ARTIFACT_SUFFIX) ./server
 
+## Regenerate protobuf .pb.go files from .proto sources.
+## Auto-installs protoc-gen-go and protoc-gen-go-grpc if not found.
+## Run this if you see protobuf panic/corruption errors at startup.
 .PHONY: pb
 pb:
-	protoc -I protobuf/ protobuf/commonpb/common.proto --go_out=paths=source_relative:protobuf/
-	protoc -I protobuf/ protobuf/sudosocpb/sudosoc.proto --go_out=paths=source_relative:protobuf/
-	protoc -I protobuf/ protobuf/clientpb/client.proto --go_out=paths=source_relative:protobuf/
-	protoc -I protobuf/ protobuf/dnspb/dns.proto --go_out=paths=source_relative:protobuf/
-	protoc -I protobuf/ protobuf/rpcpb/services.proto --go_out=paths=source_relative:protobuf/ --go-grpc_out=protobuf/ --go-grpc_opt=paths=source_relative 
+	@echo "[*] Checking protoc plugins..."
+	@export PATH=$$PATH:$$(go env GOPATH)/bin; \
+	if ! command -v protoc-gen-go >/dev/null 2>&1; then \
+		echo "[*] Installing protoc-gen-go..."; \
+		go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11; \
+	fi; \
+	if ! command -v protoc-gen-go-grpc >/dev/null 2>&1; then \
+		echo "[*] Installing protoc-gen-go-grpc..."; \
+		go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0; \
+	fi
+	@echo "[*] Regenerating .pb.go files..."
+	PATH=$$PATH:$$(go env GOPATH)/bin protoc -I protobuf/ protobuf/commonpb/common.proto --go_out=paths=source_relative:protobuf/
+	PATH=$$PATH:$$(go env GOPATH)/bin protoc -I protobuf/ protobuf/sudosocpb/sudosoc.proto --go_out=paths=source_relative:protobuf/
+	PATH=$$PATH:$$(go env GOPATH)/bin protoc -I protobuf/ protobuf/clientpb/client.proto --go_out=paths=source_relative:protobuf/
+	PATH=$$PATH:$$(go env GOPATH)/bin protoc -I protobuf/ protobuf/dnspb/dns.proto --go_out=paths=source_relative:protobuf/
+	PATH=$$PATH:$$(go env GOPATH)/bin protoc -I protobuf/ protobuf/rpcpb/services.proto --go_out=paths=source_relative:protobuf/ --go-grpc_out=protobuf/ --go-grpc_opt=paths=source_relative
+	@echo "[+] Protobuf regeneration complete."
+	@echo "    Run 'make server-only' to rebuild the server."
 
 .PHONY: debug
 debug: clean

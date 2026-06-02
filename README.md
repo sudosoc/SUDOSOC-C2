@@ -25,9 +25,231 @@
 
 ## Overview
 
-**SUDOSOC-C2** is the most advanced operator-grade Command & Control framework ever built for professional red team operations, APT adversary simulation, and offensive security research.
+**SUDOSOC-C2** is an operator-grade Command & Control framework for professional red team operations, APT adversary simulation, and offensive security research.
 
-Built on a hardened Go core with 100+ specialized modules across Windows, Linux, macOS, and Android, SUDOSOC-C2 gives operators complete control at every level — from application layer down to CPU microarchitecture and hardware firmware.
+Built on a hardened Go core with 100+ specialized modules across Windows, Linux, macOS, and Android — SUDOSOC-C2 gives operators complete control at every level, from application layer down to CPU microarchitecture and hardware firmware.
+
+Three interface modes — **Terminal**, **TUI dashboard**, and **Web UI** — let operators choose the environment that fits their workflow.
+
+---
+
+## Prerequisites
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| **Go** | 1.25+ | `go version` |
+| **Node.js** | 18+ | For Web UI build |
+| **npm** | 9+ | Comes with Node.js |
+| **protoc** | 3.x+ | Only needed for `make pb` |
+| **Git** | any | |
+
+**Linux / Raspberry Pi (ARM64):**
+```bash
+sudo apt-get install -y golang-go nodejs npm protobuf-compiler
+```
+
+**macOS:**
+```bash
+brew install go node protobuf
+```
+
+**Windows:**
+- Install Go from https://go.dev/dl/
+- Install Node.js from https://nodejs.org/
+- `winget install protobuf` or download from https://github.com/protocolbuffers/protobuf/releases
+
+---
+
+## First Run — Complete Setup
+
+> Follow these steps **in order** on a fresh clone. Each step is required once.
+
+### Step 1 — Fix Protobuf (required on first build)
+
+The auto-generated `.pb.go` files contain a binary descriptor that must be regenerated from source. Run this once:
+
+```bash
+# Installs protoc-gen-go plugins automatically then regenerates all .pb.go files
+make pb
+```
+
+> **Why?** The rebranding renamed `sliver` → `sudosoc` inside the binary protobuf descriptor bytes, corrupting the length prefixes. `make pb` regenerates them cleanly from the `.proto` source files. Without this step the server panics at startup with `slice bounds out of range`.
+
+> **Alternative:** Run the helper script: `chmod +x fix_proto.sh && ./fix_proto.sh`
+
+### Step 2 — Download Toolchain Assets (for implant generation)
+
+```bash
+# Downloads Go toolchains, Garble, and Zig for all platforms (~500 MB)
+# Required to generate implants via `generate` command
+# Takes 5–30 minutes depending on internet speed
+make assets
+```
+
+> **Skip this if** you only want to run the server/listeners/Web UI without generating implants. `make` will automatically create placeholder assets if this step is skipped.
+
+### Step 3 — Build
+
+```bash
+# Full build: Web UI (npm) + server + client
+make
+
+# OR — fast build (skip Web UI, already built or skipping)
+make server-only
+```
+
+### Step 4 — Run
+
+```bash
+# Terminal mode (default)
+./sudosoc-server
+
+# Web UI mode
+./sudosoc-server --ui
+
+# TUI dashboard mode
+./sudosoc-server --tui
+```
+
+Then connect a client:
+```bash
+./sudosoc-client
+```
+
+---
+
+## Build Reference
+
+### Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make` | Full build: Web UI + server + client |
+| `make server-only` | Rebuild Go binaries only (UI already built) |
+| `make pb` | Regenerate `.pb.go` files from `.proto` source |
+| `make assets` | Download toolchain assets (~500 MB, needed for `generate`) |
+| `make placeholders` | Create minimal asset stubs (server works, no implant generation) |
+| `make ui` | Build Web UI only (`cd webui && npm run build`) |
+| `make clean` | Remove compiled binaries |
+| `make clean-ui` | Remove Web UI dist output |
+| `make clean-all` | Remove binaries + downloaded assets |
+| `make linux-amd64` | Cross-compile for Linux x86-64 |
+| `make linux-arm64` | Cross-compile for Linux ARM64 (Pi, Ampere…) |
+| `make macos-amd64` | Cross-compile for macOS Intel |
+| `make macos-arm64` | Cross-compile for macOS Apple Silicon |
+| `make windows-amd64` | Cross-compile for Windows x64 |
+| `make android-arm64` | Build Android ARM64 implant |
+| `make android-all` | Build all Android implant variants |
+
+### Flags
+
+```bash
+# Skip npm Web UI build (use when UI is already built or not needed)
+make UI_SKIP=1
+
+# Cross-compile without rebuilding UI
+make UI_SKIP=1 linux-arm64
+```
+
+### Windows (PowerShell)
+
+```powershell
+# Full build
+make
+
+# Fast rebuild (UI already built)
+make server-only
+
+# Direct go build (no UI)
+go build -mod=vendor -tags "go_sqlite,server" -o sudosoc-server.exe ./server
+go build -mod=vendor -tags "go_sqlite,client" -o sudosoc-client.exe ./client
+```
+
+---
+
+## Operator Modes
+
+SUDOSOC-C2 ships with three fully independent interface modes — all powered by the same backend.
+
+### Terminal Mode (default)
+
+```bash
+./sudosoc-server
+```
+
+Classic interactive console. Full feature access. Fastest startup. Default for experienced operators.
+
+### TUI Mode — bubbletea dashboard
+
+```bash
+./sudosoc-server --tui
+```
+
+Rich terminal dashboard with live panels: Dashboard · Sessions · Beacons · Listeners · Loot  
+Navigate with `Tab`, `1–5`, `r` (refresh), `?` (help), `q` (quit).
+
+### Web UI Mode — browser dashboard
+
+```bash
+./sudosoc-server --ui                    # default port 8080
+./sudosoc-server --ui --ui-port 9090     # custom port
+```
+
+Full browser dashboard. Open `http://localhost:8080` after starting.
+
+**Features:**
+- Live stat cards (sessions, beacons, listeners, operators)
+- Real-time event feed over WebSocket
+- Sessions table with kill button
+- **Embedded xterm.js terminal** — click `>_` on any session to interact directly in the browser
+- Beacons, Listeners, Loot panels
+- Responsive — works on mobile browsers for monitoring
+
+### Live Switching (no restart needed)
+
+```bash
+# Toggle Web UI on/off without restarting the server:
+
+# Unix / macOS — send SIGUSR1
+kill -USR1 $(pidof sudosoc-server)
+
+# From inside Terminal or TUI console:
+sudosoc > ui start
+sudosoc > ui start --port 9090
+sudosoc > ui stop
+sudosoc > ui status
+```
+
+---
+
+## Connecting Operators
+
+```bash
+# Generate operator config (run once per operator)
+./sudosoc-server operator --name seif --lhost 127.0.0.1 --save ~/.sudosoc/configs/
+
+# Connect
+./sudosoc-client
+```
+
+---
+
+## Generating Implants & Listeners
+
+```bash
+# Start a listener first
+sudosoc > mtls
+sudosoc > https
+sudosoc > dns --domains c2.sudosoc.com
+
+# Generate implants
+sudosoc > generate --mtls <C2_IP> --os windows --arch amd64 --evasion --save /tmp/
+sudosoc > generate --https <C2_IP> --os linux   --arch amd64 --save /tmp/
+sudosoc > generate --dns  c2.sudosoc.com --os macos --arch arm64 --save /tmp/
+
+# Android implant
+make android-arm64   # or: make android-all
+```
 
 ---
 
@@ -123,7 +345,7 @@ Built on a hardened Go core with 100+ specialized modules across Windows, Linux,
 
 #### Anti-Forensics
 
-- **Kernel Timestomping** — modify $STANDARD_INFORMATION and $FILE_NAME
+- **Kernel Timestomping** — modify `$STANDARD_INFORMATION` and `$FILE_NAME`
 - **Fileless Persistence** — WMI subscriptions, zero disk footprint
 - **Event Log Wipe** — clear all Windows event logs
 - **Gargoyle Memory** — implant invisible during sleep cycles
@@ -138,7 +360,7 @@ Built on a hardened Go core with 100+ specialized modules across Windows, Linux,
 #### Autonomous Agent
 
 - LLM-powered autonomous operation (GPT-4o / Llama local)
-- Objective-driven: reach_domain_admin, extract_credentials, full_compromise
+- Objective-driven: `reach_domain_admin`, `extract_credentials`, `full_compromise`
 - Adaptive re-planning on failure via LLM
 - Dry-run mode for planning without execution
 
@@ -254,80 +476,6 @@ Features: ROP chain, heap spray (512 objects), polymorphic per-target, multi-arc
 
 ---
 
-## Quick Start
-
-### Build
-
-```bash
-# ── Linux / macOS (full build: UI + server + client) ──────────────────────
-make
-
-# Skip Web UI rebuild (fast re-run after first build)
-make UI_SKIP=1
-
-# Build only Go binaries (UI already built)
-make server-only
-
-# Build Web UI only
-make ui
-
-# ── Windows PowerShell ──────────────────────────────────────────────────────
-make                        # full build (runs npm + go build)
-make server-only            # fast rebuild, skips npm
-go build -mod=vendor -tags "go_sqlite,server" -o sudosoc-server.exe ./server
-go build -mod=vendor -tags "go_sqlite,client" -o sudosoc-client.exe ./client
-
-# ── Cross-compile (example: Linux binary from macOS/Windows) ───────────────
-make linux-amd64            # includes Web UI
-make UI_SKIP=1 linux-amd64 # skips npm (UI already in server/web/dist/)
-
-# ── Android implant ─────────────────────────────────────────────────────────
-make android-arm64          # ARM64 (most modern devices)
-make android-all            # all architectures
-make android-apk            # APK package
-```
-
-### Operator Modes
-
-```bash
-# ── Terminal Mode (default) ─────────────────────────────────────────────────
-./sudosoc-server
-
-# ── TUI Mode — rich bubbletea dashboard ─────────────────────────────────────
-./sudosoc-server --tui
-
-# ── Web UI Mode — browser dashboard on localhost:8080 ───────────────────────
-./sudosoc-server --ui
-./sudosoc-server --ui --ui-port 9090
-
-# ── Live toggle (no restart needed) ─────────────────────────────────────────
-# From inside the terminal/TUI:
-sudosoc > ui start
-sudosoc > ui start --port 9090
-sudosoc > ui stop
-sudosoc > ui status
-
-# Via signal (Unix/macOS only):
-kill -USR1 $(pidof sudosoc-server)
-
-# ── Remote operator client ───────────────────────────────────────────────────
-./sudosoc-client
-```
-
-### Generate Implants & Listeners
-
-```bash
-# Generate implant
-sudosoc > generate --mtls <C2_IP> --os windows --arch amd64 --evasion --save /tmp/
-
-# Listeners
-sudosoc > mtls
-sudosoc > https
-sudosoc > dns --domains c2.sudosoc.com
-```
-
----
-
 ## Default Ports
 
 | Service | Port | Protocol |
@@ -350,6 +498,54 @@ sudosoc > dns --domains c2.sudosoc.com
 | `~/.sudosoc/configs/` | Operator configs |
 | `~/.sudosoc/logs/sudosoc-c2.log` | Log file |
 | `/etc/sudosoc-C2/` | Server config (daemon) |
+
+---
+
+## Troubleshooting
+
+### `panic: runtime error: slice bounds out of range [-5:]` at startup
+
+The protobuf binary descriptor was corrupted during rebranding. Fix with one command:
+
+```bash
+make pb
+```
+
+This regenerates all `.pb.go` files from the `.proto` sources. Run `make server-only` after.
+
+### `pattern fs/*.zip: no matching files found` build error
+
+Toolchain assets haven't been downloaded yet. Run:
+
+```bash
+make assets     # full download (~500 MB, enables implant generation)
+# OR
+make placeholders   # minimal stubs, server runs but generate is limited
+```
+
+### Web UI shows "UI not built — run: cd webui && npm run build"
+
+```bash
+make ui          # builds the React app
+make server-only # rebuilds the server binary with the new UI embedded
+```
+
+### Web UI not accessible after `--ui`
+
+Default port is 8080. Check:
+```bash
+./sudosoc-server --ui --ui-port 8080
+# Open browser: http://localhost:8080
+```
+
+### `protoc-gen-go: command not found` when running `make pb`
+
+```bash
+go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
+export PATH=$PATH:$(go env GOPATH)/bin
+make pb
+```
 
 ---
 
@@ -377,9 +573,10 @@ sudosoc > dns --domains c2.sudosoc.com
 
 | File | Content |
 |------|---------|
-| `README.md` | This file — overview and quick start |
+| `README.md` | This file — setup, build, usage |
 | `sudosoc-c2-manual.md` | Full technical manual — every attack explained |
 | `Suggested_Hacking_Steps.md` | Complete attack lifecycle from zero to domain domination |
+| `fix_proto.sh` | Helper script to fix protobuf corruption (run once after fresh clone) |
 
 ---
 
