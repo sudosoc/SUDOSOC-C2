@@ -4,8 +4,12 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir:      '../server/web/dist',
-    emptyOutDir: true,
+    // Outputs into server/web/ui/ which is tracked by git (placeholder index.html
+    // always present so go:embed compiles on a fresh clone without running npm).
+    // The built assets (assets/*.js, assets/*.css) are gitignored — only
+    // index.html is committed so the Go embed always has at least one file.
+    outDir:      '../server/web/ui',
+    emptyOutDir: false, // keep existing placeholder; vite overwrites index.html
   },
   server: {
     port: 5173,

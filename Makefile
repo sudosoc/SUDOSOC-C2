@@ -21,7 +21,10 @@ ARMORY_PUBLIC_KEY ?= RWSBpxpRWDrD7Fe+VvRE3c2VEDC2NK80rlNCj+BX0gz44Xw07r6KQD9L
 ARMORY_REPO_URL ?= https://api.github.com/repos/sliverarmory/armory/releases
 CLIENT_ASSETS_PKG = github.com/sudosoc/SUDOSOC-C2/client/assets
 SLIVER_UPDATE_PKG = github.com/sudosoc/SUDOSOC-C2/client/command/update
-PB_COMPILERS = protoc protoc-gen-go protoc-gen-go-grpc
+# Only validate protoc itself at Makefile parse time.
+# protoc-gen-go and protoc-gen-go-grpc are installed automatically by `make pb`
+# into $(go env GOPATH)/bin and validated in the recipe, not at parse time.
+PB_COMPILERS = protoc
 
 ifneq ($(OS),Windows_NT)
 
@@ -99,11 +102,13 @@ endif
 # Targets
 #
 
-## Build the React Web UI (outputs to server/web/dist/ embedded via go:embed)
+## Build the React Web UI (outputs to server/web/ui/ embedded via go:embed)
+## The placeholder server/web/ui/index.html is always committed to git so
+## go:embed compiles even without running this target first.
 .PHONY: ui
 ui:
 	cd webui && npm install && npm run build
-	@echo "[+] Web UI built → server/web/dist/"
+	@echo "[+] Web UI built → server/web/ui/"
 
 ## Download Go toolchains + Garble + Zig for implant generation (~500 MB)
 ## Required for full `generate` functionality; takes 10-30 min depending on internet speed.
@@ -115,30 +120,31 @@ assets:
 
 ## Create minimal placeholder assets so the server compiles without downloading toolchains.
 ## The server will run (listeners, sessions, Web UI, TUI, etc.) but `generate` implants
-## will not work. Run `make assets` later to enable full implant generation.
+## will not work until `make assets` is run.
 .PHONY: placeholders
 placeholders:
 	@echo "[*] Creating placeholder assets for compilation without toolchain download..."
 	@mkdir -p server/assets/fs/linux/amd64 server/assets/fs/linux/arm64
 	@mkdir -p server/assets/fs/darwin/amd64 server/assets/fs/darwin/arm64
 	@mkdir -p server/assets/fs/windows/amd64
-	@[ -f server/assets/fs/linux/amd64/placeholder.txt ]   || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/linux/amd64/placeholder.txt
-	@[ -f server/assets/fs/linux/arm64/placeholder.txt ]   || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/linux/arm64/placeholder.txt
-	@[ -f server/assets/fs/darwin/amd64/placeholder.txt ]  || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/darwin/amd64/placeholder.txt
-	@[ -f server/assets/fs/darwin/arm64/placeholder.txt ]  || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/darwin/arm64/placeholder.txt
-	@[ -f server/assets/fs/windows/amd64/placeholder.txt ] || echo "placeholder - run 'make assets' for implant generation" > server/assets/fs/windows/amd64/placeholder.txt
+	@[ -f server/assets/fs/linux/amd64/placeholder.txt ]   || echo "placeholder" > server/assets/fs/linux/amd64/placeholder.txt
+	@[ -f server/assets/fs/linux/arm64/placeholder.txt ]   || echo "placeholder" > server/assets/fs/linux/arm64/placeholder.txt
+	@[ -f server/assets/fs/darwin/amd64/placeholder.txt ]  || echo "placeholder" > server/assets/fs/darwin/amd64/placeholder.txt
+	@[ -f server/assets/fs/darwin/arm64/placeholder.txt ]  || echo "placeholder" > server/assets/fs/darwin/arm64/placeholder.txt
+	@[ -f server/assets/fs/windows/amd64/placeholder.txt ] || echo "placeholder" > server/assets/fs/windows/amd64/placeholder.txt
 	@if [ ! -f server/assets/fs/placeholder.zip ]; then \
 		cd server/assets/fs && zip -q placeholder.zip empty.txt && cd ../../..; \
 	fi
+	@[ -f server/web/ui/index.html ] || $(MAKE) ui
 	@touch .downloaded_assets
 	@echo "[+] Placeholder assets created — server will compile and run."
-	@echo "    Run 'make assets' later to enable implant generation."
+	@echo "    Run 'make assets' later to enable full implant generation."
 
-## Remove the compiled Web UI artifacts only (keep node_modules)
+## Remove compiled Web UI built assets (keeps placeholder index.html)
 .PHONY: clean-ui
 clean-ui:
-	rm -rf server/web/dist/*
-	@echo "[-] Web UI dist cleaned"
+	rm -rf server/web/ui/assets
+	@echo "[-] Web UI assets cleaned (placeholder index.html preserved)"
 
 ## Default: build Web UI + server + client for the current platform
 ## If toolchain assets are missing, automatically creates placeholders (no implant generation).
@@ -155,12 +161,15 @@ default: clean validate-go-version $(_UI_DEP)
 	$(ENV) $(if $(GOOS),GOOS=$(GOOS)) $(if $(GOARCH),GOARCH=$(GOARCH)) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 	@echo "[+] Build complete → sudosoc-server$(ARTIFACT_SUFFIX) + sudosoc-client$(ARTIFACT_SUFFIX)"
 
-## Rebuild only the Go binaries (skips UI and asset downloads — use after first full build)
+## Rebuild only the Go binaries.
+## Auto-creates placeholder assets/UI if missing so the build always succeeds.
 .PHONY: server-only
 server-only:
+	@[ -f .downloaded_assets ]          || $(MAKE) placeholders
+	@[ -f server/web/ui/index.html ]    || $(MAKE) ui
 	$(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	$(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
-	@echo "[+] Go binaries rebuilt (UI unchanged)"
+	@echo "[+] Go binaries rebuilt"
 
 # Allows you to build a CGO-free client for any target
 # NOTE: WireGuard is not supported on all platforms, but most 64-bit GOOS/GOARCH combinations should work.

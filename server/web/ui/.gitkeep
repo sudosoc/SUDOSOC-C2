@@ -1,0 +1,3 @@
+# This directory is populated by `make ui` (cd webui && npm run build).
+# The placeholder index.html is kept so `go:embed all:dist` compiles on a
+# fresh checkout before npm has been run.

@@ -25,26 +25,32 @@ import (
 	"strings"
 )
 
-// dist holds the compiled React/Vite output from webui/dist/.
-// Build it with:  cd webui && npm run build
-// The Makefile target `make ui` handles this automatically.
+// ui holds the compiled React/Vite output from webui/ (built into server/web/ui/).
 //
-//go:embed all:dist
-var dist embed.FS
+// The placeholder server/web/ui/index.html is committed to the repository so
+// that `go:embed` always compiles even on a fresh clone without running `make ui`.
+// Running `make ui` (cd webui && npm run build) overwrites ui/ with the full
+// React application; rebuild the server binary afterwards to embed it.
+//
+// Build sequence:
+//   make ui          → compile React into server/web/ui/
+//   make server-only → embed ui/ into the server binary
+//
+//go:embed all:ui
+var uiFS embed.FS
 
-// distFS is the sub-filesystem rooted at the embedded dist/ directory.
-var distFS fs.FS
+// spaFS is the sub-filesystem rooted at the embedded ui/ directory.
+var spaFS fs.FS
 
 func init() {
 	var err error
-	distFS, err = fs.Sub(dist, "dist")
+	spaFS, err = fs.Sub(uiFS, "ui")
 	if err != nil {
-		panic("web: failed to open embedded dist/: " + err.Error())
+		panic("web: failed to open embedded ui/: " + err.Error())
 	}
 }
 
-// isStaticAsset returns true for file extensions that should be served
-// verbatim without falling back to index.html.
+// isStaticAsset returns true for extensions that should be served verbatim.
 func isStaticAsset(path string) bool {
 	static := []string{
 		".js", ".css", ".png", ".jpg", ".jpeg", ".gif",
@@ -59,10 +65,10 @@ func isStaticAsset(path string) bool {
 	return false
 }
 
-// serveSPA serves the React single-page application.
+// serveSPA serves the React single-page application from the embedded ui/ FS.
 //
-//   - Static assets (*.js, *.css, images …) → served directly from dist/.
-//   - Everything else → dist/index.html, so the React Router handles the route.
+//   - Static assets (*.js, *.css, images …) → served directly.
+//   - Everything else → ui/index.html so the React Router handles client-side routing.
 func serveSPA(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	if path == "" {
@@ -70,20 +76,19 @@ func serveSPA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isStaticAsset(path) {
-		// Try to open the exact file; 404 if missing.
-		if _, err := distFS.Open(path); err != nil {
+		if _, err := spaFS.Open(path); err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		http.FileServer(http.FS(distFS)).ServeHTTP(w, r)
+		http.FileServer(http.FS(spaFS)).ServeHTTP(w, r)
 		return
 	}
 
 	// SPA fallback — serve index.html for all navigable routes.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data, err := fs.ReadFile(distFS, "index.html")
+	data, err := fs.ReadFile(spaFS, "index.html")
 	if err != nil {
-		http.Error(w, "UI not built — run: cd webui && npm run build", http.StatusServiceUnavailable)
+		http.Error(w, "UI not built — run: make ui && make server-only", http.StatusServiceUnavailable)
 		return
 	}
 	_, _ = w.Write(data)
