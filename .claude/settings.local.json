@@ -53,7 +53,8 @@
       "Bash(git -c user.name=\"sudosoc\" -c user.email=\"sudosoc@sudosoc.com\" commit -m \"docs: comprehensive README + final identity cleanup\")",
       "Bash(grep -n \"^//go:build\\\\|^// +build\" implant/sliver/handlers/handlers_linux.go)",
       "Bash(go list *)",
-      "Bash(grep -rn \"^//go:build\\\\|^// +build\" implant/sliver/handlers/rpc-handlers_linux.go)"
+      "Bash(grep -rn \"^//go:build\\\\|^// +build\" implant/sliver/handlers/rpc-handlers_linux.go)",
+      "Bash(python3 -c \"print\\(open\\('README.md',encoding='utf-8'\\).read\\(\\)[:100]\\)\")"
     ]
   }
 }

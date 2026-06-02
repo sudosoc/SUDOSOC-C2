@@ -1,0 +1,91 @@
+package web
+
+/*
+	SUDOSOC-C2 Framework
+	Copyright (C) 2026  Seif
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/gorilla/mux"
+)
+
+// buildRouter wires up all HTTP and WebSocket routes.
+// Called by the WebUIManager on every Start().
+func buildRouter() *mux.Router {
+	r := mux.NewRouter()
+
+	// ── REST API ──────────────────────────────────────────────────────────
+	api := r.PathPrefix("/api").Subrouter()
+	api.Use(corsMiddleware)
+	api.Use(jsonMiddleware)
+	api.Use(requestTimeoutMiddleware) // 30-second max per API call
+
+	api.HandleFunc("/stats", handleStats).Methods(http.MethodGet)
+	api.HandleFunc("/sessions", handleSessions).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/kill", handleSessionKill).Methods(http.MethodDelete)
+	api.HandleFunc("/beacons", handleBeacons).Methods(http.MethodGet)
+	api.HandleFunc("/listeners", handleListeners).Methods(http.MethodGet)
+	api.HandleFunc("/loot", handleLoot).Methods(http.MethodGet)
+	api.HandleFunc("/operators", handleOperators).Methods(http.MethodGet)
+
+	// ── WebSocket ─────────────────────────────────────────────────────────
+	r.HandleFunc("/ws/events", handleWSEvents)
+	r.HandleFunc("/ws/terminal/{sessionID}", handleWSTerminal)
+
+	// ── Static SPA (React) ────────────────────────────────────────────────
+	// The embedded FS is served from static.go; unknown routes fall back to
+	// index.html so the React router handles deep links.
+	r.PathPrefix("/").HandlerFunc(serveSPA)
+
+	return r
+}
+
+// corsMiddleware adds permissive CORS headers for the local UI during dev.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// jsonMiddleware sets Content-Type: application/json for all API responses.
+func jsonMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requestTimeoutMiddleware wraps API handlers with a 30-second server-side timeout.
+func requestTimeoutMiddleware(next http.Handler) http.Handler {
+	return http.TimeoutHandler(next, 30*time.Second, `{"error":"request timeout"}`)
+}
+
+// jsonError writes a standard JSON error response.
+func jsonError(w http.ResponseWriter, msg string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_, _ = w.Write([]byte(`{"error":"` + msg + `"}`))
+}

@@ -83,43 +83,77 @@ ifeq ($(MAKECMDGOALS), linux)
 		-X $(CLIENT_ASSETS_PKG).DefaultArmoryRepoURL=$(ARMORY_REPO_URL)"
 endif
 
+# ─── Web UI ───────────────────────────────────────────────────────────────────
+# Set UI_SKIP=1 to skip the React build step (cross-compilation / fast re-runs
+# when the UI is already built).
+#   make UI_SKIP=1 linux-amd64
+UI_SKIP ?= 0
+
+ifeq ($(UI_SKIP),0)
+_UI_DEP := ui
+else
+_UI_DEP :=
+endif
+
 #
 # Targets
 #
+
+## Build the React Web UI (outputs to server/web/dist/ embedded via go:embed)
+.PHONY: ui
+ui:
+	cd webui && npm install && npm run build
+	@echo "[+] Web UI built → server/web/dist/"
+
+## Remove the compiled Web UI artifacts only (keep node_modules)
+.PHONY: clean-ui
+clean-ui:
+	rm -rf server/web/dist/*
+	@echo "[-] Web UI dist cleaned"
+
+## Default: build Web UI + server + client for the current platform
 .PHONY: default
-default: clean validate-go-version
+default: clean validate-go-version $(_UI_DEP)
 	env -u GOOS -u GOARCH $(MAKE) GOOS= GOARCH= .downloaded_assets
 	$(ENV) $(if $(GOOS),GOOS=$(GOOS)) $(if $(GOARCH),GOARCH=$(GOARCH)) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	$(ENV) $(if $(GOOS),GOOS=$(GOOS)) $(if $(GOARCH),GOARCH=$(GOARCH)) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
+	@echo "[+] Build complete → sudosoc-server$(ARTIFACT_SUFFIX) + sudosoc-client$(ARTIFACT_SUFFIX)"
 
-# Allows you to build a CGO-free client for any target e.g. `GOOS=windows GOARCH=arm64 make client`
+## Rebuild only the Go binaries (skips UI and asset downloads — use after first full build)
+.PHONY: server-only
+server-only:
+	$(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
+	$(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
+	@echo "[+] Go binaries rebuilt (UI unchanged)"
+
+# Allows you to build a CGO-free client for any target
 # NOTE: WireGuard is not supported on all platforms, but most 64-bit GOOS/GOARCH combinations should work.
 .PHONY: client
 client: clean .downloaded_assets validate-go-version
 	$(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client ./client
 
 .PHONY: macos-amd64
-macos-amd64: clean .downloaded_assets validate-go-version
+macos-amd64: clean $(_UI_DEP) .downloaded_assets validate-go-version
 	GOOS=darwin GOARCH=amd64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	GOOS=darwin GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 
 .PHONY: macos-arm64
-macos-arm64: clean .downloaded_assets validate-go-version
+macos-arm64: clean $(_UI_DEP) .downloaded_assets validate-go-version
 	GOOS=darwin GOARCH=arm64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	GOOS=darwin GOARCH=arm64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 
 .PHONY: linux-amd64
-linux-amd64: clean .downloaded_assets validate-go-version
+linux-amd64: clean $(_UI_DEP) .downloaded_assets validate-go-version
 	GOOS=linux GOARCH=amd64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	GOOS=linux GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 
 .PHONY: linux-arm64
-linux-arm64: clean .downloaded_assets validate-go-version
+linux-arm64: clean $(_UI_DEP) .downloaded_assets validate-go-version
 	GOOS=linux GOARCH=arm64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX) ./server
 	GOOS=linux GOARCH=arm64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX) ./client
 
 .PHONY: windows-amd64
-windows-amd64: clean .downloaded_assets validate-go-version
+windows-amd64: clean $(_UI_DEP) .downloaded_assets validate-go-version
 	GOOS=windows GOARCH=amd64 $(ENV) CGO_ENABLED=$(CGO_ENABLED) $(GO) build -mod=vendor -trimpath $(TAGS),server $(LDFLAGS) -o sudosoc-server$(ARTIFACT_SUFFIX).exe ./server
 	GOOS=windows GOARCH=amd64 $(ENV) CGO_ENABLED=0 $(GO) build -mod=vendor -trimpath $(TAGS),client $(LDFLAGS) -o sudosoc-client$(ARTIFACT_SUFFIX).exe ./client
 
@@ -225,6 +259,7 @@ clean-all: clean
 .PHONY: clean
 clean:
 	rm -f sudosoc-client sudosoc-client_* sudosoc-server sudosoc-server_* sliver-*.exe
+	@echo "[-] Binaries cleaned (run 'make clean-ui' to also remove Web UI dist)"
 
 .downloaded_assets:
 	$(ENV) $(GO) run -mod=vendor ./util/cmd/assets
@@ -261,38 +296,52 @@ define windows_go_build
 $(call windows_exec,$(ENV) GOOS=$(1) GOARCH=$(2) CGO_ENABLED=$(3),"$(GO)" build $(4) $(TAGS)$(COMMA)$(5) $(6) -o $(7) ./$(5))
 endef
 
+## Build the React Web UI (Windows)
+.PHONY: ui
+ui:
+	cd webui && npm install && npm run build
+	@echo [+] Web UI built
+
+## Rebuild only the Go binaries — fast path when UI is already built (Windows)
+.PHONY: server-only
+server-only:
+	$(call windows_go_build,$(GOOS),$(GOARCH),$(CGO_ENABLED),-mod=vendor -trimpath,server,$(LDFLAGS),sudosoc-server$(ARTIFACT_SUFFIX))
+	$(call windows_go_build,$(GOOS),$(GOARCH),0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client$(ARTIFACT_SUFFIX))
+	@echo [+] Go binaries rebuilt
+
 .PHONY: default
-default: clean validate-go-version
+default: clean validate-go-version ui
 	$(call windows_exec,$(ENV) GOOS= GOARCH=,"$(MAKE)" GOOS= GOARCH= .downloaded_assets)
 	$(call windows_go_build,$(GOOS),$(GOARCH),$(CGO_ENABLED),-mod=vendor -trimpath,server,$(LDFLAGS),sudosoc-server$(ARTIFACT_SUFFIX))
 	$(call windows_go_build,$(GOOS),$(GOARCH),0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client$(ARTIFACT_SUFFIX))
+	@echo [+] Build complete
 
 .PHONY: client
 client: clean .downloaded_assets validate-go-version
 	$(call windows_go_build,$(GOOS),$(GOARCH),0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client)
 
 .PHONY: macos-amd64
-macos-amd64: clean .downloaded_assets validate-go-version
+macos-amd64: clean ui .downloaded_assets validate-go-version
 	$(call windows_go_build,darwin,amd64,$(CGO_ENABLED),-mod=vendor -trimpath,server,$(LDFLAGS),sudosoc-server$(ARTIFACT_SUFFIX))
 	$(call windows_go_build,darwin,amd64,0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client$(ARTIFACT_SUFFIX))
 
 .PHONY: macos-arm64
-macos-arm64: clean .downloaded_assets validate-go-version
+macos-arm64: clean ui .downloaded_assets validate-go-version
 	$(call windows_go_build,darwin,arm64,$(CGO_ENABLED),-mod=vendor -trimpath,server,$(LDFLAGS),sudosoc-server$(ARTIFACT_SUFFIX))
 	$(call windows_go_build,darwin,arm64,0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client$(ARTIFACT_SUFFIX))
 
 .PHONY: linux-amd64
-linux-amd64: clean .downloaded_assets validate-go-version
+linux-amd64: clean ui .downloaded_assets validate-go-version
 	$(call windows_go_build,linux,amd64,$(CGO_ENABLED),-mod=vendor -trimpath,server,$(LDFLAGS),sudosoc-server$(ARTIFACT_SUFFIX))
 	$(call windows_go_build,linux,amd64,0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client$(ARTIFACT_SUFFIX))
 
 .PHONY: linux-arm64
-linux-arm64: clean .downloaded_assets validate-go-version
+linux-arm64: clean ui .downloaded_assets validate-go-version
 	$(call windows_go_build,linux,arm64,$(CGO_ENABLED),-mod=vendor -trimpath,server,$(LDFLAGS),sudosoc-server$(ARTIFACT_SUFFIX))
 	$(call windows_go_build,linux,arm64,0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client$(ARTIFACT_SUFFIX))
 
 .PHONY: windows-amd64
-windows-amd64: clean .downloaded_assets validate-go-version
+windows-amd64: clean ui .downloaded_assets validate-go-version
 	$(call windows_go_build,windows,amd64,$(CGO_ENABLED),-mod=vendor -trimpath,server,$(LDFLAGS),sudosoc-server$(ARTIFACT_SUFFIX).exe)
 	$(call windows_go_build,windows,amd64,0,-mod=vendor -trimpath,client,$(LDFLAGS),sudosoc-client$(ARTIFACT_SUFFIX).exe)
 
@@ -350,6 +399,13 @@ clean-all: clean
 .PHONY: clean
 clean:
 	-del /Q /F sudosoc-client sudosoc-client_* sudosoc-server sudosoc-server_* sliver-*.exe 2>NUL
+
+## Remove compiled Web UI (Windows)
+.PHONY: clean-ui
+clean-ui:
+	-rmdir /S /Q server\web\dist 2>NUL
+	-mkdir server\web\dist 2>NUL
+	@echo [-] Web UI dist cleaned
 
 .downloaded_assets:
 	$(call windows_exec,$(ENV),"$(GO)" run -mod=vendor ./util/cmd/assets)
