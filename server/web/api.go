@@ -173,10 +173,12 @@ func handleListeners(w http.ResponseWriter, r *http.Request) {
 	all := core.Jobs.All()
 	out := make([]listenerJSON, 0, len(all))
 	for _, j := range all {
+		// j.Protocol is the transport layer ("tcp", "udp") — not what the UI wants.
+		// j.Name is the application-layer protocol ("mtls", "http", "https", "dns", "wg").
 		out = append(out, listenerJSON{
 			ID:       j.ID,
 			Name:     j.Name,
-			Protocol: j.Protocol,
+			Protocol: j.Name,   // use Name (mtls/http/https/dns/wg) not Protocol (tcp/udp)
 			Port:     j.Port,
 			Domains:  j.Domains,
 		})

