@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAPI } from '../hooks/useAPI'
 import type { Session, Beacon, Listener } from '../types'
-import { Map, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
+import { Map as MapIcon, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 
 // ─── Node types ───────────────────────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ export default function NetworkMap() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-primary font-bold text-lg flex items-center gap-2">
-            <Map size={18} /> Network Map
+            <MapIcon size={18} /> Network Map
           </h2>
           <p className="text-muted text-xs mt-1">
             {sessList.length} sessions · {beaconList.length} beacons · {lstList.length} listeners
@@ -226,7 +226,7 @@ export default function NetworkMap() {
         {/* Empty state */}
         {totalNodes === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 pointer-events-none">
-            <Map size={40} className="text-border" />
+            <MapIcon size={40} className="text-border" />
             <p className="text-muted text-sm">No nodes yet</p>
             <p className="text-muted text-xs">Start a listener and deploy implants to see the network map</p>
           </div>

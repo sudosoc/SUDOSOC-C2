@@ -15,7 +15,7 @@ import { useEventStream } from './hooks/useWebSocket'
 import type { WSEvent }   from './types'
 import {
   LayoutDashboard, Monitor, Radio, Antenna, Package,
-  Smartphone, Cpu, Bot, Settings2, Map, FileText,
+  Smartphone, Cpu, Bot, Settings2, Map as MapIcon, FileText,
   Terminal as TermIcon, Wifi, WifiOff, Loader,
 } from 'lucide-react'
 
@@ -35,7 +35,7 @@ const TABS: { id: TabID; label: string; icon: React.ElementType; color: string }
   { id: 'android',   label: 'Android',     icon: Smartphone,       color: '#00ff88' },
   { id: 'listeners', label: 'Listeners',   icon: Antenna,          color: '#ffaa00' },
   { id: 'loot',      label: 'Loot',        icon: Package,          color: '#aa88ff' },
-  { id: 'netmap',    label: 'Network Map', icon: Map,              color: '#00d4ff' },
+  { id: 'netmap',    label: 'Network Map', icon: MapIcon,          color: '#00d4ff' },
   { id: 'generate',  label: 'Generate',    icon: Cpu,              color: '#00d4ff' },
   { id: 'reports',   label: 'Reports',     icon: FileText,         color: '#aa88ff' },
   { id: 'ai',        label: 'AI Agent',    icon: Bot,              color: '#aa88ff' },
