@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Cpu, Copy, CheckCheck, Terminal as TermIcon, ChevronDown, Zap, Shield, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { apiFetch, apiPost } from '../hooks/useAPI'
+import { Cpu, Copy, CheckCheck, Terminal as TermIcon, Zap, Shield, AlertCircle, CheckCircle2, Radio } from 'lucide-react'
+import { apiFetch, apiPost, useAPI } from '../hooks/useAPI'
+import type { Listener } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,18 @@ export default function Generate() {
   const [result,   setResult]   = useState<{ command: string; message: string } | null>(null)
   const [error,    setError]    = useState<string | null>(null)
   const [copied,   setCopied]   = useState(false)
+
+  // ── Live listeners for the picker ─────────────────────────────────────
+  const { data: listeners } = useAPI<Listener[]>('/api/listeners', 5_000)
+
+  function pickListener(l: Listener) {
+    // Auto-fill protocol, host (empty = 0.0.0.0 → operator should put their IP), port
+    const proto = l.protocol?.toLowerCase() ?? 'mtls'
+    setProtocol(proto)
+    setC2Port(l.port)
+    // If domains available (DNS), fill domains field
+    if (l.domains && l.domains.length > 0) setDomains(l.domains.join(', '))
+  }
 
   // ── Load smart options when OS or arch changes ──────────────────────────
   useEffect(() => {
@@ -166,6 +179,33 @@ export default function Generate() {
                   </label>
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* ── Listener Quick-Pick ─────────────────────────────── */}
+          {listeners && listeners.length > 0 && (
+            <section className="rounded-lg border border-primary/20 bg-primary/5 p-3 flex flex-col gap-2">
+              <label className="text-[10px] text-primary uppercase tracking-widest flex items-center gap-1">
+                <Radio size={10} /> Active Listeners — click to auto-fill
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {listeners.map(l => (
+                  <button key={l.id} onClick={() => pickListener(l)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-border bg-surface hover:border-primary hover:bg-primary/10 transition-all text-xs group">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+                    <span className="font-bold text-primary uppercase">{l.protocol}</span>
+                    <span className="text-muted">:{l.port}</span>
+                    {l.domains && l.domains.length > 0 && (
+                      <span className="text-muted text-[9px] hidden group-hover:inline">
+                        ({l.domains[0]})
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[9px] text-muted">
+                Clicking auto-fills the protocol + port. You still need to set your public C2 host below.
+              </p>
             </section>
           )}
 

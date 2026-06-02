@@ -79,7 +79,14 @@ func parseDCSyncOutput(output string) []DCSyncResult {
 	if output == "" {
 		return nil
 	}
-	return []DCSyncResult{{Username: "parsed", Domain: "from", NTHash: output[:min(len(output), 32)]}}
+	// Use a local variable to avoid {{…}} sequence that confuses the Go template engine
+	// which processes implant source files during implant generation.
+	r := DCSyncResult{
+		Username: "parsed",
+		Domain:   "from",
+		NTHash:   output[:min(len(output), 32)],
+	}
+	return []DCSyncResult{r}
 }
 
 func min(a, b int) int {
