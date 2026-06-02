@@ -79,8 +79,8 @@ func parseDCSyncOutput(output string) []DCSyncResult {
 	if output == "" {
 		return nil
 	}
-	// Use a local variable to avoid {{…}} sequence that confuses the Go template engine
-	// which processes implant source files during implant generation.
+	// Use a local variable to avoid double-brace struct literals
+	// that confuse the Go template engine during implant generation.
 	r := DCSyncResult{
 		Username: "parsed",
 		Domain:   "from",
