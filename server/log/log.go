@@ -94,7 +94,7 @@ func GetLogDir() string {
 func rootLogger() *logrus.Logger {
 	rootLogger := logrus.New()
 	rootLogger.Formatter = &logrus.JSONFormatter{}
-	jsonFilePath := filepath.Join(GetLogDir(), "sliver.json")
+	jsonFilePath := filepath.Join(GetLogDir(), "sudosoc.json")
 	jsonFile, err := os.OpenFile(jsonFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to open log file %v", err))

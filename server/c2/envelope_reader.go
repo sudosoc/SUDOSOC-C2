@@ -24,7 +24,7 @@ func readSocketEnvelopeData(reader io.Reader, dataLength int, inMemoryLimit int)
 		return dataBuf, nil
 	}
 
-	tmpFile, err := os.CreateTemp("", "sliver-envelope-*")
+	tmpFile, err := os.CreateTemp("", "sudosoc-envelope-*")
 	if err != nil {
 		return nil, err
 	}

@@ -94,7 +94,7 @@ type DatabaseConfig struct {
 func (c *DatabaseConfig) DSN() (string, error) {
 	switch c.Dialect {
 	case Sqlite:
-		filePath := filepath.Join(assets.GetRootAppDir(), "sliver.db")
+		filePath := filepath.Join(assets.GetRootAppDir(), "sudosoc.db")
 		params := encodeSQLiteParams(c.Params, c.Pragmas)
 		return fmt.Sprintf("file:%s?%s", filePath, params), nil
 	case MySQL:

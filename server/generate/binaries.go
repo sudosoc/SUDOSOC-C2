@@ -93,7 +93,7 @@ const (
 	// DefaultReconnectInterval - In seconds
 	DefaultReconnectInterval = 60
 	// DefaultMTLSLPort - Default listen port
-	DefaultMTLSLPort = 8888
+	DefaultMTLSLPort = 31337
 	// DefaultHTTPLPort - Default HTTP listen port
 	DefaultHTTPLPort = 443 // Assume SSL, it'll fallback
 	// DefaultPollInterval - In seconds
@@ -380,7 +380,7 @@ func linuxShellcode(name string, build *clientpb.ImplantBuild, config *clientpb.
 		return "", err
 	}
 
-	tmpFile, err := os.CreateTemp("", "sliver-*.so")
+	tmpFile, err := os.CreateTemp("", "sudosoc-*.so")
 	if err != nil {
 		return "", err
 	}
@@ -466,7 +466,7 @@ func darwinShellcode(name string, build *clientpb.ImplantBuild, config *clientpb
 		return "", err
 	}
 
-	tmpFile, err := os.CreateTemp("", "sliver-*.dylib")
+	tmpFile, err := os.CreateTemp("", "sudosoc-*.dylib")
 	if err != nil {
 		return "", err
 	}

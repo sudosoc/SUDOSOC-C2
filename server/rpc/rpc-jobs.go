@@ -35,7 +35,7 @@ import (
 const (
 	defaultMTLSPort    = 4444
 	defaultWGPort      = 53
-	defaultWGNPort     = 8888
+	defaultWGNPort     = 31338
 	defaultWGKeyExPort = 1337
 	defaultDNSPort     = 53
 	defaultHTTPPort    = 80

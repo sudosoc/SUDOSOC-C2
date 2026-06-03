@@ -557,8 +557,19 @@ func UpdateHTTPC2Listener(listenerConf *clientpb.ListenerJob) error {
 }
 
 // UpdateListenerJobID - Update a listener record's job id while preserving listener configuration rows.
+// If newJobID already exists in the table (e.g. the job counter wrapped after a restart), the old
+// record is deleted so the new live job ID becomes the authoritative entry.
 func UpdateListenerJobID(oldJobID uint32, newJobID uint32) error {
 	if oldJobID == newJobID {
+		return nil
+	}
+
+	// Check whether newJobID is already taken by another saved record.
+	var conflict models.ListenerJob
+	if err := Session().Where("job_id = ?", newJobID).First(&conflict).Error; err == nil {
+		// newJobID already exists — delete the stale old record so the running
+		// job can claim its own ID without hitting a UNIQUE constraint.
+		Session().Where("job_id = ?", oldJobID).Delete(&models.ListenerJob{})
 		return nil
 	}
 
