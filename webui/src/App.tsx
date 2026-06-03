@@ -154,7 +154,7 @@ export default function App() {
           {activeTab === 'android'   && <Android   onOpenTerminal={openTerminal} />}
           {activeTab === 'listeners' && <Listeners />}
           {activeTab === 'loot'      && <Loot      />}
-          {activeTab === 'netmap'    && <NetworkMap />}
+          {activeTab === 'netmap'    && <NetworkMap onOpenTerminal={openTerminal} />}
           {activeTab === 'generate'  && <Generate  />}
           {activeTab === 'reports'   && <Reports   />}
           {activeTab === 'ai'        && <AI        />}
