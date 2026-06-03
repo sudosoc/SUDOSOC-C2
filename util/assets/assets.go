@@ -47,7 +47,7 @@ func Run(args []string) error {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
-	workDir, err := os.MkdirTemp("", "sliver-assets-")
+	workDir, err := os.MkdirTemp("", "sudosoc-assets-")
 	if err != nil {
 		return fmt.Errorf("create work dir: %w", err)
 	}
@@ -60,7 +60,7 @@ func Run(args []string) error {
 		workDir:    workDir,
 	}
 
-	log.Header("Sliver Assets")
+	log.Header("SUDOSOC-C2 Assets")
 	log.Meta("Workdir", workDir)
 	log.Meta("Output", outputDir)
 

@@ -73,7 +73,7 @@ func (r *runner) fetchToWriter(url string, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("User-Agent", "sliver-assets")
+	req.Header.Set("User-Agent", "sudosoc-assets")
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
