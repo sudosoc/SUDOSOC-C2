@@ -273,12 +273,13 @@ func azureIMDS() ([]CloudCredential, error) {
 	if tok.AccessToken == "" {
 		return nil, fmt.Errorf("no token")
 	}
-	return []CloudCredential{{
+	cred := CloudCredential{
 		Provider: "Azure",
 		Source:   "imds",
 		Key:      "managed_identity_token",
 		Value:    tok.AccessToken,
-	}}, nil
+	}
+	return []CloudCredential{cred}, nil
 }
 
 func gcpIMDS() ([]CloudCredential, error) {
@@ -289,10 +290,11 @@ func gcpIMDS() ([]CloudCredential, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []CloudCredential{{
+	cred := CloudCredential{
 		Provider: "GCP",
 		Source:   "imds",
 		Key:      "service_account_token",
 		Value:    string(data),
-	}}, nil
+	}
+	return []CloudCredential{cred}, nil
 }

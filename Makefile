@@ -246,9 +246,14 @@ android-all: android-arm64 android-arm android-amd64
 	@echo "[*] All Android implants built"
 
 .PHONY: android-apk
-## Package Android implant into APK
+## Package Android implant into APK (requires Android SDK)
+## If ANDROID_HOME is not set, checks common Debian/Kali paths automatically.
+## To install SDK on Debian/Kali: sudo apt install android-sdk android-sdk-build-tools
 android-apk: android-arm64
-	@bash build/android/build_apk.sh phantom_android_arm64
+	@if [ -z "$(ANDROID_HOME)" ] && [ -d "/usr/lib/android-sdk" ]; then \
+		export ANDROID_HOME="/usr/lib/android-sdk"; \
+	fi; \
+	bash build/android/build_apk.sh phantom_android_arm64
 	@echo "[*] APK built: phantom_android.apk"
 
 .PHONY: clients

@@ -39,7 +39,13 @@ error() { echo -e "${RED}[!]${NC} $1"; exit 1; }
 
 if [ -z "${ANDROID_HOME:-}" ]; then
     warn "ANDROID_HOME not set — attempting to find SDK"
-    for p in ~/Android/Sdk /opt/android-sdk /usr/local/android-sdk; do
+    for p in \
+        ~/Android/Sdk \
+        /opt/android-sdk \
+        /usr/local/android-sdk \
+        /usr/lib/android-sdk \
+        /usr/share/android-sdk \
+        /opt/android; do
         if [ -d "$p" ]; then
             export ANDROID_HOME="$p"
             info "Found SDK at $ANDROID_HOME"
@@ -48,7 +54,9 @@ if [ -z "${ANDROID_HOME:-}" ]; then
     done
 fi
 
-[ -d "${ANDROID_HOME:-}" ] || error "Android SDK not found. Set ANDROID_HOME."
+if [ ! -d "${ANDROID_HOME:-}" ]; then
+    error "Android SDK not found. Try: sudo apt install android-sdk android-sdk-build-tools"
+fi
 
 # Find build-tools version
 BUILD_TOOLS=$(ls "$ANDROID_HOME/build-tools/" | sort -V | tail -1)
