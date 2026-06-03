@@ -141,22 +141,33 @@ func handleWSTerminal(w http.ResponseWriter, r *http.Request) {
 // executeOnSession sends a shell execute request to the implant and returns
 // combined stdout+stderr as a string.
 func executeOnSession(_ context.Context, session *core.Session, cmd string) (string, error) {
-	args := strings.Fields(cmd)
-	if len(args) == 0 {
+	if strings.TrimSpace(cmd) == "" {
 		return "", nil
 	}
 
-	// args[0] is the executable path; remaining args are passed separately.
-	path := args[0]
-	argv := args[1:]
+	var req *sudosocpb.ExecuteReq
 
-	req := &sudosocpb.ExecuteReq{
-		Path:   path,
-		Args:   argv,
-		Output: true,
-		Request: &commonpb.Request{
-			SessionID: session.ID,
-		},
+	// Android implants run in a restricted process without PATH configured.
+	// Wrap every command in /system/bin/sh -c so binaries are found via the
+	// shell (same fix as the REST API execute handler).
+	if strings.Contains(strings.ToLower(session.OS), "android") {
+		req = &sudosocpb.ExecuteReq{
+			Path:   "/system/bin/sh",
+			Args:   []string{"-c", cmd},
+			Output: true,
+			Request: &commonpb.Request{SessionID: session.ID},
+		}
+	} else {
+		args := strings.Fields(cmd)
+		if len(args) == 0 {
+			return "", nil
+		}
+		req = &sudosocpb.ExecuteReq{
+			Path:   args[0],
+			Args:   args[1:],
+			Output: true,
+			Request: &commonpb.Request{SessionID: session.ID},
+		}
 	}
 
 	resp := &sudosocpb.Execute{Response: &commonpb.Response{}}
