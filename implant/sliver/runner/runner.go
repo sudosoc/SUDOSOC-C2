@@ -41,7 +41,9 @@ import (
 	// {{end}}
 	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/handlers"
 	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/hostuuid"
+	// {{if ne .Config.GOOS "android"}}
 	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/limits"
+	// {{end}}
 	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/locale"
 	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/pivots"
 	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/transports"
