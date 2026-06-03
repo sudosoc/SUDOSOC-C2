@@ -106,6 +106,7 @@ func (serv *sliverService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 
 // {{end}}
 
+// {{if ne .Config.GOOS "android"}}
 func Main() {
 
 	// {{if .Config.Debug}}
@@ -139,6 +140,7 @@ func Main() {
 
 	// {{end}} ------- IsService -------
 }
+// {{end}}
 
 // {{if .Config.IsBeacon}}
 func beaconStartup() {
