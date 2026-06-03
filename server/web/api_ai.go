@@ -165,6 +165,122 @@ Response style:
 	return base + "\n\n─── Current C2 Context ───\n" + extraContext
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/settings/ai  — return current AI config (key masked)
+// POST /api/settings/ai — save AI provider config
+// ─────────────────────────────────────────────────────────────────────────────
+
+type aiSettingsReq struct {
+	Provider string `json:"provider"`          // openrouter, openai, openai-compat, anthropic
+	APIKey   string `json:"api_key"`            // raw key — stored securely in config file
+	Model    string `json:"model,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"` // for openai-compat
+}
+
+type aiSettingsResp struct {
+	Provider     string `json:"provider"`
+	Model        string `json:"model,omitempty"`
+	BaseURL      string `json:"base_url,omitempty"`
+	APIKeyMasked string `json:"api_key_masked,omitempty"` // e.g. "sk-…abc" — never return real key
+}
+
+func handleGetAISettings(w http.ResponseWriter, r *http.Request) {
+	cfg := configs.GetServerConfig()
+	if cfg.AI == nil {
+		_ = json.NewEncoder(w).Encode(aiSettingsResp{})
+		return
+	}
+	resp := aiSettingsResp{
+		Provider: cfg.AI.Provider,
+		Model:    cfg.AI.Model,
+	}
+	// Return masked key + base URL for the active provider
+	var provCfg *configs.AIProviderConfig
+	switch cfg.AI.Provider {
+	case "openrouter":
+		provCfg = cfg.AI.OpenRouter
+	case "openai":
+		provCfg = cfg.AI.OpenAI
+	case "openai-compat":
+		provCfg = cfg.AI.OpenAICompat
+	case "anthropic":
+		provCfg = cfg.AI.Anthropic
+	}
+	if provCfg != nil {
+		resp.BaseURL = provCfg.BaseURL
+		if provCfg.APIKey != "" {
+			k := provCfg.APIKey
+			if len(k) > 8 {
+				resp.APIKeyMasked = k[:4] + "…" + k[len(k)-4:]
+			} else {
+				resp.APIKeyMasked = "****"
+			}
+		}
+		if len(provCfg.Models) > 0 && resp.Model == "" {
+			resp.Model = provCfg.Models[0]
+		}
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func handleSaveAISettings(w http.ResponseWriter, r *http.Request) {
+	var req aiSettingsReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Provider == "" {
+		jsonError(w, "provider is required", http.StatusBadRequest)
+		return
+	}
+
+	cfg := configs.GetServerConfig()
+	if cfg.AI == nil {
+		cfg.AI = &configs.AIConfig{}
+	}
+	cfg.AI.Provider = req.Provider
+	if req.Model != "" {
+		cfg.AI.Model = req.Model
+	}
+
+	// Build provider-specific config
+	provCfg := &configs.AIProviderConfig{
+		APIKey:  req.APIKey,
+		BaseURL: req.BaseURL,
+	}
+	if req.Model != "" {
+		provCfg.Models = []string{req.Model}
+	}
+
+	switch req.Provider {
+	case "openrouter":
+		if provCfg.BaseURL == "" {
+			provCfg.BaseURL = "https://openrouter.ai/api/v1"
+		}
+		cfg.AI.OpenRouter = provCfg
+	case "openai":
+		cfg.AI.OpenAI = provCfg
+	case "openai-compat":
+		cfg.AI.OpenAICompat = provCfg
+	case "anthropic":
+		cfg.AI.Anthropic = provCfg
+	default:
+		jsonError(w, fmt.Sprintf("unsupported provider %q", req.Provider), http.StatusBadRequest)
+		return
+	}
+
+	if err := cfg.Save(); err != nil {
+		jsonError(w, fmt.Sprintf("failed to save config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":   "saved",
+		"provider": req.Provider,
+		"model":    req.Model,
+	})
+}
+
 // buildAIContext builds a context string from live session/beacon data
 // to inject into the system prompt so the AI has situational awareness.
 func buildAIContext() string {
