@@ -118,20 +118,31 @@ export default function Generate() {
     <div className="flex flex-col gap-6 h-full">
 
       {/* ── Header ────────────────────────────────────────────────────── */}
-      <div>
-        <h2 className="text-primary font-bold text-lg flex items-center gap-2">
-          <Cpu size={18} /> Generate Implant
-        </h2>
-        <p className="text-muted text-xs mt-1">Smart adaptive form — options change automatically based on target OS</p>
+      <div className="flex items-center justify-between shrink-0">
+        <div>
+          <h2 className="text-primary font-bold text-lg flex items-center gap-2">
+            <Cpu size={18} /> Generate Implant
+          </h2>
+          <p className="text-muted text-xs mt-0.5">Adaptive payload builder — options auto-update based on target OS</p>
+        </div>
+        {opts && (
+          <div className="hidden xl:flex items-center gap-2 text-[11px]">
+            <span className="text-muted">Target:</span>
+            <span className="text-text font-semibold">{os} / {arch}</span>
+            <span className="text-border">·</span>
+            <span className="text-text font-mono">{protocol}:{c2port}</span>
+            {c2host && <><span className="text-border">→</span><span className="text-primary font-mono">{c2host}</span></>}
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 flex-1 min-h-0">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 min-h-0">
 
         {/* ── Left: Config ────────────────────────────────────────────── */}
         <div className="flex flex-col gap-4 overflow-y-auto">
 
           {/* OS Selector */}
-          <section className="rounded-lg border border-border bg-surface p-4">
+          <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3">
             <label className="text-[10px] text-muted uppercase tracking-widest mb-3 block">Target OS</label>
             <div className="grid grid-cols-4 gap-2">
               {OS_LIST.map(o => (
@@ -150,7 +161,7 @@ export default function Generate() {
 
           {/* Architecture */}
           {opts && (
-            <section className="rounded-lg border border-border bg-surface p-4 flex flex-col gap-2">
+            <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
               <label className="text-[10px] text-muted uppercase tracking-widest">Architecture</label>
               <div className="flex flex-wrap gap-2">
                 {opts.arches.map(a => (
@@ -167,7 +178,7 @@ export default function Generate() {
 
           {/* Output Format */}
           {opts && (
-            <section className="rounded-lg border border-border bg-surface p-4 flex flex-col gap-2">
+            <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
               <label className="text-[10px] text-muted uppercase tracking-widest flex items-center gap-1">
                 <TermIcon size={10} /> Output Format
               </label>
@@ -248,7 +259,7 @@ export default function Generate() {
           </section>
 
           {/* ── Step 2: C2 Host ONLY (no port here) ─────────────── */}
-          <section className="rounded-lg border border-border bg-surface p-3 flex flex-col gap-2">
+          <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
             <label className="text-[10px] text-warn uppercase tracking-widest">
               Step 2 — C2 Host (the IP or domain the implant will connect to)
             </label>
@@ -266,7 +277,7 @@ export default function Generate() {
 
           {/* ── Step 3: C2 Channel + Port ────────────────────────── */}
           {opts && (
-            <section className="rounded-lg border border-border bg-surface p-3 flex flex-col gap-2">
+            <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
               <label className="text-[10px] text-muted uppercase tracking-widest flex items-center gap-1">
                 <Zap size={10} /> Step 3 — C2 Channel + Port
                 <span className="text-muted font-normal normal-case ml-1">
@@ -316,7 +327,7 @@ export default function Generate() {
 
           {/* Evasion */}
           {opts && opts.evasion.length > 0 && (
-            <section className="rounded-lg border border-border bg-surface p-4 flex flex-col gap-2">
+            <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
               <label className="text-[10px] text-muted uppercase tracking-widest flex items-center gap-1">
                 <Shield size={10} /> {isAndroid ? 'Anti-Analysis' : 'Evasion & Obfuscation'}
               </label>
@@ -355,9 +366,12 @@ export default function Generate() {
 
           {/* Generate button */}
           <button onClick={submit} disabled={loading}
-            className="w-full py-3 rounded-lg border-2 border-primary text-primary font-bold text-sm flex items-center justify-center gap-2 hover:bg-primary hover:text-bg transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+            className="w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: 'linear-gradient(135deg, #00ff8820, #00d4ff15)', border: '2px solid #00ff88', color: '#00ff88' }}
+            onMouseEnter={e => { if (!loading) { (e.currentTarget as HTMLButtonElement).style.background = '#00ff88'; (e.currentTarget as HTMLButtonElement).style.color = '#080812' } }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'linear-gradient(135deg, #00ff8820, #00d4ff15)'; (e.currentTarget as HTMLButtonElement).style.color = '#00ff88' }}>
             <Cpu size={16} />
-            {loading ? 'Configuring…' : 'Generate Implant'}
+            {loading ? 'Building payload…' : '⚡ Generate Implant'}
           </button>
 
           {/* Error */}
@@ -384,13 +398,21 @@ export default function Generate() {
                     {copied ? <><CheckCheck size={10} className="text-primary" /> Copied!</> : <><Copy size={10} /> Copy</>}
                   </button>
                 </div>
-                <div className="rounded-lg border border-border bg-surface p-4 font-mono text-xs text-primary">
-                  <span className="text-muted select-none">sudosoc {'>'} </span>
-                  <span className="whitespace-pre-wrap break-all">{result.command}</span>
+                <div className="rounded-xl border border-primary/30 overflow-hidden">
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0a0a18] border-b border-border/40">
+                    <div className="w-2.5 h-2.5 rounded-full bg-danger/60" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-warn/60" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-primary/60" />
+                    <span className="text-muted text-[9px] ml-2">server console</span>
+                  </div>
+                  <div className="p-3 font-mono text-xs text-primary bg-[#050510]">
+                    <span className="text-muted select-none">sudosoc {'>'} </span>
+                    <span className="whitespace-pre-wrap break-all">{result.command}</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="rounded-lg border border-border bg-surface p-3 text-xs text-muted">
+              <div className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 text-xs text-muted">
                 <div className="text-text text-[10px] font-semibold uppercase tracking-widest mb-2">Next Steps</div>
                 <ol className="list-decimal list-inside flex flex-col gap-1 text-[11px]">
                   <li>Start listener: <span className="text-accent font-mono">sudosoc {'>'} {protocol}</span></li>
@@ -407,7 +429,7 @@ export default function Generate() {
 
           {/* Summary card */}
           {opts && !result && (
-            <div className="rounded-lg border border-border bg-surface p-4 flex flex-col gap-2 text-xs">
+            <div className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2 text-xs">
               <div className="text-muted text-[10px] uppercase tracking-widest mb-1">Current Config</div>
               {[
                 ['OS',       `${os} (${arch})`],

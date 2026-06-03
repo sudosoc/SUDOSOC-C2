@@ -73,6 +73,10 @@ func buildRouter() *mux.Router {
 	api.HandleFunc("/generate/options", handleGenerateOptions).Methods(http.MethodGet)
 	api.HandleFunc("/generate",         handleGenerate).Methods(http.MethodPost)
 
+	// ── AI ─────────────────────────────────────────────────────────────
+	api.HandleFunc("/ai/chat",   handleAIChat).Methods(http.MethodPost)
+	api.HandleFunc("/ai/status", handleAIStatus).Methods(http.MethodGet)
+
 	// ── WebSocket ─────────────────────────────────────────────────────────
 	r.HandleFunc("/ws/events", handleWSEvents)
 	r.HandleFunc("/ws/terminal/{sessionID}", handleWSTerminal)

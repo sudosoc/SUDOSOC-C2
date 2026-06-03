@@ -471,8 +471,9 @@ export default function Agents({ onOpenTerminal }: Props) {
                                 {!f.is_dir && (
                                   <button
                                     onClick={() => downloadFile(a.id, fsData[a.id].path + '/' + f.name)}
-                                    className="opacity-0 group-hover:opacity-100 text-muted hover:text-primary transition-all">
-                                    <Download size={10} />
+                                    title={`Download ${f.name}`}
+                                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border border-primary/30 text-primary hover:bg-primary/10 transition-colors shrink-0">
+                                    <Download size={9} /> DL
                                   </button>
                                 )}
                               </div>
