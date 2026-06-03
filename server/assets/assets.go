@@ -57,7 +57,7 @@ func GetRootAppDir() string {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		err = os.MkdirAll(dir, 0700)
 		if err != nil {
-			setupLog.Fatalf("Cannot write to sliver root dir %s", err)
+			setupLog.Fatalf("Cannot write to SUDOSOC-C2 root dir %s", err)
 		}
 	}
 	return dir

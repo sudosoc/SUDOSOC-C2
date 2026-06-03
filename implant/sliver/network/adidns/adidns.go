@@ -192,16 +192,18 @@ Expected results:
 
 func (h *ADIDNSHijacker) connect() error {
 	addr := fmt.Sprintf("%s:636", h.DomainController)
-	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+	tlsConn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
-		// Try plain LDAP on 389
+		// Fall back to plain LDAP on 389
 		addr = fmt.Sprintf("%s:389", h.DomainController)
-		conn, err = net.Dial("tcp", addr)
-		if err != nil {
-			return fmt.Errorf("LDAP connection failed: %v", err)
+		plainConn, err2 := net.Dial("tcp", addr)
+		if err2 != nil {
+			return fmt.Errorf("LDAP connection failed: %v", err2)
 		}
+		h.ldapConn = plainConn
+		return nil
 	}
-	h.ldapConn = conn
+	h.ldapConn = tlsConn
 	return nil
 }
 

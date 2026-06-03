@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	defaultMTLSPort    = 4444
+	defaultMTLSPort    = 31337
 	defaultWGPort      = 53
 	defaultWGNPort     = 31338
 	defaultWGKeyExPort = 1337

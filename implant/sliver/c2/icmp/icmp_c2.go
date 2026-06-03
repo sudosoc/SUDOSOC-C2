@@ -101,7 +101,7 @@ func (c *ICMPC2) Send(data []byte) error {
 
 	for i, chunk := range chunks {
 		pkt := c.buildPacket(baseSeq, total, uint32(i), chunk)
-		icmpPkt := buildICMP(icmpEchoRequest, 0, uint16(baseSeq&0xFFFF), pkt)
+		icmpPkt := buildICMP(icmpEchoRequest, 0, uint16(baseSeq&0xFFFF), uint16(i), pkt)
 
 		_, err := c.conn.WriteTo(icmpPkt, &net.IPAddr{IP: c.ServerIP})
 		if err != nil {

@@ -38,10 +38,12 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"time"
 )
 
@@ -272,14 +274,6 @@ func randomSerial() *big.Int {
 	return new(big.Int).SetBytes(serialBytes)
 }
 
-// Missing imports placeholder
-type pkix struct{}
-type big struct {
-	Int interface{}
-}
-
-func (b *big) SetBytes([]byte) *big { return b }
-func (b *big) Int2() interface{}    { return nil }
 
 // Workaround for import
 var _ = asn1.Marshal
