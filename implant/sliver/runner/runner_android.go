@@ -85,8 +85,7 @@ func androidSessionStartup() {
 // {{if .Config.IsBeacon}}
 
 // androidBeaconStartup - beacon mode using the shared transport loop.
-// Only compiled when IsBeacon=true; both StartBeaconLoop and beaconMainLoop
-// live inside {{if .Config.IsBeacon}} blocks and are absent for session builds.
+// Only compiled when IsBeacon=true (beacon symbols are absent for session builds).
 func androidBeaconStartup() {
 	// {{if .Config.Debug}}
 	log.Printf("[android] starting beacon mode")
