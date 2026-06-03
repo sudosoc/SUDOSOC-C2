@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import Dashboard  from './components/Dashboard'
+import Agents     from './components/Agents'
 import Sessions   from './components/Sessions'
 import Beacons    from './components/Beacons'
 import Listeners  from './components/Listeners'
@@ -12,165 +13,355 @@ import NetworkMap from './components/NetworkMap'
 import Reports    from './components/Reports'
 import Terminal   from './components/Terminal'
 import { useEventStream } from './hooks/useWebSocket'
-import type { WSEvent }   from './types'
+import type { WSEvent } from './types'
 import {
   LayoutDashboard, Monitor, Radio, Antenna, Package,
   Smartphone, Cpu, Bot, Settings2, Map as MapIcon, FileText,
-  Terminal as TermIcon, Wifi, WifiOff, Loader,
+  Terminal as TermIcon, Wifi, WifiOff, Loader, Shield,
+  Users, ChevronLeft, Bell, BellOff, Activity,
+  Crosshair, X, Clock, AlertCircle,
 } from 'lucide-react'
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tab definitions
-// ─────────────────────────────────────────────────────────────────────────────
-
-type TabID =
-  | 'dashboard' | 'sessions' | 'beacons'  | 'android'
-  | 'listeners' | 'loot'     | 'netmap'   | 'generate'
-  | 'reports'   | 'ai'       | 'settings'
-
-const TABS: { id: TabID; label: string; icon: React.ElementType; color: string }[] = [
-  { id: 'dashboard', label: 'Dashboard',   icon: LayoutDashboard, color: '#00ff88' },
-  { id: 'sessions',  label: 'Sessions',    icon: Monitor,          color: '#00ff88' },
-  { id: 'beacons',   label: 'Beacons',     icon: Radio,            color: '#00d4ff' },
-  { id: 'android',   label: 'Android',     icon: Smartphone,       color: '#00ff88' },
-  { id: 'listeners', label: 'Listeners',   icon: Antenna,          color: '#ffaa00' },
-  { id: 'loot',      label: 'Loot',        icon: Package,          color: '#aa88ff' },
-  { id: 'netmap',    label: 'Network Map', icon: MapIcon,          color: '#00d4ff' },
-  { id: 'generate',  label: 'Generate',    icon: Cpu,              color: '#00d4ff' },
-  { id: 'reports',   label: 'Reports',     icon: FileText,         color: '#aa88ff' },
-  { id: 'ai',        label: 'AI Agent',    icon: Bot,              color: '#aa88ff' },
-  { id: 'settings',  label: 'Settings',    icon: Settings2,        color: '#555577' },
-]
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface ActiveTerminal {
-  sessionID:   string
-  sessionName: string
+// ─── Event log entry ──────────────────────────────────────────────────────────
+interface EventEntry {
+  id:      number
+  ts:      number
+  type:    string
+  msg:     string
+  icon:    string
+  urgent:  boolean
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// App
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Tab config ───────────────────────────────────────────────────────────────
+type TabID =
+  | 'dashboard' | 'agents'   | 'sessions'  | 'beacons'   | 'android'
+  | 'listeners' | 'loot'     | 'netmap'    | 'generate'
+  | 'reports'   | 'ai'       | 'settings'
+
+interface NavItem {
+  id:    TabID
+  label: string
+  icon:  React.ElementType
+  color: string
+  badge?: string
+}
+
+const NAV: NavItem[] = [
+  { id: 'dashboard', label: 'Dashboard',    icon: LayoutDashboard, color: '#00ff88' },
+  { id: 'agents',    label: 'Agents',       icon: Crosshair,       color: '#ff4444' },
+  { id: 'sessions',  label: 'Sessions',     icon: Monitor,         color: '#00d4ff' },
+  { id: 'beacons',   label: 'Beacons',      icon: Radio,           color: '#ffaa00' },
+  { id: 'android',   label: 'Android',      icon: Smartphone,      color: '#00ff88' },
+  { id: 'listeners', label: 'Listeners',    icon: Antenna,         color: '#aa88ff' },
+  { id: 'loot',      label: 'Loot',         icon: Package,         color: '#aa88ff' },
+  { id: 'netmap',    label: 'Network Map',  icon: MapIcon,         color: '#00d4ff' },
+  { id: 'generate',  label: 'Generate',     icon: Cpu,             color: '#00d4ff' },
+  { id: 'reports',   label: 'Reports',      icon: FileText,        color: '#888899' },
+  { id: 'ai',        label: 'AI Agent',     icon: Bot,             color: '#aa88ff' },
+]
+const NAV_BOTTOM: NavItem[] = [
+  { id: 'settings',  label: 'Settings',     icon: Settings2,       color: '#555577' },
+]
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+let _evId = 0
+function parseEvent(e: WSEvent): EventEntry {
+  const payload = e.payload as Record<string, string>
+  const name    = payload.session_name ?? payload.beacon_name ?? payload.operator ?? ''
+  const typeMap: Record<string, [string, boolean]> = {
+    'session-connected':    ['💀', true  ],
+    'session-disconnected': ['🔴', true  ],
+    'beacon-registered':    ['📡', true  ],
+    'operator-joined':      ['👤', false ],
+    'operator-left':        ['👤', false ],
+    'job-started':          ['▶️', false ],
+    'job-stopped':          ['⏹️', false ],
+  }
+  const [icon, urgent] = typeMap[e.type] ?? ['•', false]
+  const ts = e.time ? e.time * 1000 : Date.now()
+  return {
+    id:     ++_evId,
+    ts,
+    type:   e.type,
+    msg:    name ? `${e.type}  ${name}` : e.type,
+    icon,
+    urgent,
+  }
+}
+
+function tsAgo(ts: number) {
+  const s = Math.floor((Date.now() - ts) / 1000)
+  if (s < 60)   return `${s}s ago`
+  if (s < 3600) return `${Math.floor(s/60)}m ago`
+  return `${Math.floor(s/3600)}h ago`
+}
+
+// ─── App ─────────────────────────────────────────────────────────────────────
+
+interface ActiveTerminal { sessionID: string; sessionName: string }
 
 export default function App() {
   const [activeTab,    setActiveTab]   = useState<TabID>('dashboard')
   const [terminal,     setTerminal]    = useState<ActiveTerminal | null>(null)
-  const [notification, setNote]        = useState<string | null>(null)
+  const [sidebarOpen,  setSidebarOpen] = useState(true)
+  const [showEvents,   setShowEvents]  = useState(false)
+  const [events,       setEvents]      = useState<EventEntry[]>([])
+  const [unreadCount,  setUnreadCount] = useState(0)
+  const [agentCount,   setAgentCount]  = useState({ sessions: 0, beacons: 0 })
+  const evLogRef = useRef<HTMLDivElement>(null)
 
-  // ── Live event stream ─────────────────────────────────────────────────────
-  const onEvent = useCallback((e: WSEvent) => {
+  // ── WebSocket event handler ─────────────────────────────────────────────
+  const onWsEvent = useCallback((e: WSEvent) => {
     if (e.type === 'heartbeat') return
-    const payload = e.payload as Record<string, string>
-    const subject = payload.session_name ?? payload.beacon_name ?? payload.operator ?? ''
-    const note    = subject ? `[${e.type}] ${subject}` : `[${e.type}]`
-    setNote(note)
-    setTimeout(() => setNote(null), 4000)
-  }, [])
+    const entry = parseEvent(e)
+    setEvents(prev => [entry, ...prev].slice(0, 200))
+    if (!showEvents) setUnreadCount(c => c + 1)
 
-  const wsStatus = useEventStream(onEvent)
+    // Update agent badge counts on connect/disconnect
+    if (e.type === 'session-connected')    setAgentCount(c => ({ ...c, sessions: c.sessions + 1 }))
+    if (e.type === 'session-disconnected') setAgentCount(c => ({ ...c, sessions: Math.max(0, c.sessions - 1) }))
+    if (e.type === 'beacon-registered')    setAgentCount(c => ({ ...c, beacons: c.beacons + 1 }))
+  }, [showEvents])
+
+  const wsStatus = useEventStream(onWsEvent)
+
+  // Auto-scroll event log to top when new events arrive
+  useEffect(() => {
+    if (showEvents && evLogRef.current) {
+      evLogRef.current.scrollTop = 0
+    }
+  }, [events.length, showEvents])
 
   function openTerminal(sessionID: string, sessionName = '') {
     setTerminal({ sessionID, sessionName: sessionName || sessionID.slice(0, 8) })
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────────────────
+  function openEventsPanel() {
+    setShowEvents(v => !v)
+    setUnreadCount(0)
+  }
+
+  const totalAgents = agentCount.sessions + agentCount.beacons
+
+  const activeItem = [...NAV, ...NAV_BOTTOM].find(n => n.id === activeTab)
+
+  const sidebarW = sidebarOpen ? 200 : 56
 
   return (
-    <div className="flex flex-col h-screen bg-bg text-text font-mono overflow-hidden">
+    <div className="flex h-screen bg-bg text-text font-mono overflow-hidden">
 
-      {/* ── Navigation bar ───────────────────────────────────────────────── */}
-      <nav className="flex items-center justify-between border-b border-border bg-surface shrink-0 px-4 py-0">
+      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      <aside
+        className="flex flex-col bg-[#080812] border-r border-border shrink-0 transition-all duration-150 overflow-hidden"
+        style={{ width: sidebarW }}>
 
-        {/* Logo */}
-        <div className="flex items-center gap-2 py-3 shrink-0">
-          <span className="text-primary font-bold text-sm tracking-wider">SUDOSOC-C2</span>
-          <span className="text-muted text-[10px] hidden lg:block">v2.0.0</span>
-        </div>
-
-        {/* Tab bar — scrollable on small screens */}
-        <div className="flex overflow-x-auto no-scrollbar">
-          {TABS.map(t => {
-            const Icon   = t.icon
-            const active = activeTab === t.id
-            return (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id)}
-                className={[
-                  'flex items-center gap-1.5 px-3 py-3 text-xs border-b-2 transition-colors whitespace-nowrap shrink-0',
-                  active
-                    ? 'border-b-2 font-semibold'
-                    : 'border-transparent text-muted hover:text-text',
-                ].join(' ')}
-                style={active ? { borderColor: t.color, color: t.color } : {}}
-              >
-                <Icon size={12} />
-                <span className="hidden md:inline">{t.label}</span>
-              </button>
-            )
-          })}
-
-          {/* Terminal tab — visible when a session is open */}
-          {terminal && (
-            <button
-              className="flex items-center gap-1.5 px-3 py-3 text-xs border-b-2 font-semibold whitespace-nowrap shrink-0 animate-pulse"
-              style={{ borderColor: '#00d4ff', color: '#00d4ff' }}
-              onClick={() => {/* already shown below */}}
-            >
-              <TermIcon size={12} />
-              <span className="hidden md:inline">{terminal.sessionName}</span>
+        {/* Logo + collapse toggle */}
+        <div className={`flex items-center py-4 border-b border-border/50 shrink-0 ${sidebarOpen ? 'px-4 gap-3' : 'justify-center'}`}>
+          <div className="w-8 h-8 rounded-md bg-primary/10 border border-primary/30 flex items-center justify-center shrink-0">
+            <Shield size={16} className="text-primary" />
+          </div>
+          {sidebarOpen && (
+            <div className="flex-1 min-w-0">
+              <div className="text-primary font-bold text-xs tracking-wider truncate">SUDOSOC-C2</div>
+              <div className="text-muted text-[9px]">v2.0.0</div>
+            </div>
+          )}
+          {sidebarOpen && (
+            <button onClick={() => setSidebarOpen(false)} className="text-muted hover:text-text shrink-0">
+              <ChevronLeft size={14} />
             </button>
           )}
         </div>
 
-        {/* Status bar */}
-        <div className="flex items-center gap-3 py-3 shrink-0">
-          {notification && (
-            <span className="text-[10px] text-warn animate-pulse max-w-[140px] truncate hidden lg:block">
-              {notification}
-            </span>
-          )}
-          <div className="flex items-center gap-1 text-[10px]">
-            {wsStatus === 'connected'    && <><Wifi     size={11} className="text-primary" /><span className="text-primary hidden md:inline">connected</span></>}
-            {wsStatus === 'disconnected' && <><WifiOff  size={11} className="text-danger"  /><span className="text-danger  hidden md:inline">disconnected</span></>}
-            {wsStatus === 'connecting'   && <><Loader   size={11} className="text-warn animate-spin" /><span className="text-warn hidden md:inline">connecting…</span></>}
-          </div>
+        {/* Nav items */}
+        <div className="flex-1 overflow-y-auto py-2 flex flex-col gap-0.5 px-1.5">
+          {NAV.map(item => {
+            const Icon   = item.icon
+            const active = activeTab === item.id
+            const isAgents = item.id === 'agents'
+            return (
+              <button key={item.id}
+                onClick={() => { setActiveTab(item.id); if (!sidebarOpen) setSidebarOpen(true) }}
+                title={sidebarOpen ? undefined : item.label}
+                className={`flex items-center gap-2.5 px-2 py-2 rounded-md text-xs transition-all group ${
+                  active
+                    ? 'font-semibold'
+                    : 'text-muted hover:text-text hover:bg-white/5'
+                } ${sidebarOpen ? '' : 'justify-center'}`}
+                style={active ? { background: item.color + '18', color: item.color } : {}}>
+                <Icon size={15} className="shrink-0" style={active ? { color: item.color } : {}} />
+                {sidebarOpen && <span className="truncate">{item.label}</span>}
+                {/* Badge for Agents */}
+                {isAgents && totalAgents > 0 && (
+                  <span className={`ml-auto shrink-0 rounded-full text-[9px] font-bold px-1.5 py-0.5 ${
+                    sidebarOpen ? '' : 'hidden'
+                  }`}
+                  style={{ background: '#ff444433', color: '#ff4444' }}>
+                    {totalAgents}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
-      </nav>
 
-      {/* ── Main content ─────────────────────────────────────────────────── */}
-      <div className={`flex-1 min-h-0 ${terminal ? 'grid grid-rows-[1fr_40%]' : 'flex flex-col'}`}>
-
-        {/* Active tab panel */}
-        <div className="flex-1 min-h-0 overflow-auto p-4">
-          {activeTab === 'dashboard' && <Dashboard />}
-          {activeTab === 'sessions'  && <Sessions  onOpenTerminal={openTerminal} />}
-          {activeTab === 'beacons'   && <Beacons   />}
-          {activeTab === 'android'   && <Android   onOpenTerminal={openTerminal} />}
-          {activeTab === 'listeners' && <Listeners />}
-          {activeTab === 'loot'      && <Loot      />}
-          {activeTab === 'netmap'    && <NetworkMap onOpenTerminal={openTerminal} />}
-          {activeTab === 'generate'  && <Generate  />}
-          {activeTab === 'reports'   && <Reports   />}
-          {activeTab === 'ai'        && <AI        />}
-          {activeTab === 'settings'  && <Settings  />}
-        </div>
-
-        {/* Embedded terminal — opens at bottom when a session is selected */}
-        {terminal && (
-          <div className="min-h-0 border-t border-border">
-            <Terminal
-              sessionID={terminal.sessionID}
-              sessionName={terminal.sessionName}
-              onClose={() => setTerminal(null)}
-            />
+        {/* Collapse toggle (when closed) */}
+        {!sidebarOpen && (
+          <div className="px-1.5 pb-1">
+            <button onClick={() => setSidebarOpen(true)}
+              className="w-full flex justify-center py-2 text-muted hover:text-primary transition-colors">
+              <ChevronLeft size={14} className="rotate-180" />
+            </button>
           </div>
         )}
+
+        {/* Bottom nav */}
+        <div className="border-t border-border/50 py-2 flex flex-col gap-0.5 px-1.5">
+          {NAV_BOTTOM.map(item => {
+            const Icon   = item.icon
+            const active = activeTab === item.id
+            return (
+              <button key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                title={sidebarOpen ? undefined : item.label}
+                className={`flex items-center gap-2.5 px-2 py-2 rounded-md text-xs transition-all ${
+                  active ? 'font-semibold' : 'text-muted hover:text-text hover:bg-white/5'
+                } ${sidebarOpen ? '' : 'justify-center'}`}
+                style={active ? { background: item.color + '18', color: item.color } : {}}>
+                <Icon size={15} className="shrink-0" />
+                {sidebarOpen && <span className="truncate">{item.label}</span>}
+              </button>
+            )
+          })}
+        </div>
+      </aside>
+
+      {/* ── Main area ────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0">
+
+        {/* ── Top header bar ──────────────────────────────────────────── */}
+        <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface shrink-0 h-11">
+          <div className="flex items-center gap-2">
+            {activeItem && (
+              <>
+                <activeItem.icon size={14} style={{ color: activeItem.color }} />
+                <span className="text-text text-sm font-semibold">{activeItem.label}</span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Event log toggle */}
+            <button onClick={openEventsPanel}
+              title="Event log"
+              className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] border transition-colors ${
+                showEvents
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border text-muted hover:border-primary/30 hover:text-primary'
+              }`}>
+              {showEvents ? <BellOff size={11} /> : <Bell size={11} />}
+              <span className="hidden sm:inline">Events</span>
+              {unreadCount > 0 && !showEvents && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-danger text-[8px] text-white flex items-center justify-center font-bold">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {/* Terminal toggle */}
+            {terminal && (
+              <button
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] border border-primary/40 bg-primary/10 text-primary"
+                title="Active terminal">
+                <TermIcon size={11} />
+                <span className="hidden sm:inline max-w-[80px] truncate">{terminal.sessionName}</span>
+              </button>
+            )}
+
+            {/* WS status */}
+            <div className="flex items-center gap-1.5 text-[11px] border border-border rounded px-2.5 py-1">
+              {wsStatus === 'connected'  && <><Wifi    size={11} className="text-primary" /><span className="text-primary hidden sm:inline">connected</span></>}
+              {wsStatus === 'disconnected' && <><WifiOff size={11} className="text-danger"  /><span className="text-danger  hidden sm:inline">offline</span></>}
+              {wsStatus === 'connecting'   && <><Loader  size={11} className="text-warn animate-spin" /><span className="text-warn hidden sm:inline">…</span></>}
+            </div>
+          </div>
+        </header>
+
+        {/* ── Content stack ──────────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col min-h-0">
+
+          {/* Main tab content */}
+          <div className="flex-1 min-h-0 overflow-auto p-4">
+            {activeTab === 'dashboard' && <Dashboard  onOpenTerminal={openTerminal} />}
+            {activeTab === 'agents'    && <Agents     onOpenTerminal={openTerminal} />}
+            {activeTab === 'sessions'  && <Sessions   onOpenTerminal={openTerminal} />}
+            {activeTab === 'beacons'   && <Beacons    />}
+            {activeTab === 'android'   && <Android    onOpenTerminal={openTerminal} />}
+            {activeTab === 'listeners' && <Listeners  />}
+            {activeTab === 'loot'      && <Loot       />}
+            {activeTab === 'netmap'    && <NetworkMap  onOpenTerminal={openTerminal} />}
+            {activeTab === 'generate'  && <Generate   />}
+            {activeTab === 'reports'   && <Reports    />}
+            {activeTab === 'ai'        && <AI         />}
+            {activeTab === 'settings'  && <Settings   />}
+          </div>
+
+          {/* ── Terminal panel (slide up) ────────────────────────────── */}
+          {terminal && (
+            <div className="shrink-0 border-t border-primary/30" style={{ height: '38vh' }}>
+              <Terminal
+                sessionID={terminal.sessionID}
+                sessionName={terminal.sessionName}
+                onClose={() => setTerminal(null)}
+              />
+            </div>
+          )}
+
+          {/* ── Event log panel (slide up) ───────────────────────────── */}
+          {showEvents && (
+            <div className="shrink-0 border-t border-border bg-[#080812]" style={{ height: terminal ? '25vh' : '30vh' }}>
+              <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
+                <div className="flex items-center gap-2 text-[11px]">
+                  <Activity size={12} className="text-primary" />
+                  <span className="text-primary font-semibold">Event Log</span>
+                  <span className="text-muted">({events.length} events)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setEvents([])} className="text-muted hover:text-danger text-[10px]">Clear</button>
+                  <button onClick={() => setShowEvents(false)} className="text-muted hover:text-text">
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+              <div ref={evLogRef} className="overflow-y-auto h-[calc(100%-36px)] font-mono text-[11px]">
+                {events.length === 0 ? (
+                  <div className="p-3 text-muted">No events yet — waiting for C2 activity…</div>
+                ) : (
+                  events.map(ev => (
+                    <div key={ev.id}
+                      className={`flex items-start gap-3 px-4 py-1.5 border-b border-border/20 hover:bg-white/3 ${
+                        ev.urgent ? 'bg-danger/5' : ''
+                      }`}>
+                      <span className="shrink-0 text-base leading-none mt-0.5">{ev.icon}</span>
+                      <span className="text-muted shrink-0 tabular-nums">
+                        {new Date(ev.ts).toLocaleTimeString()}
+                      </span>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
+                        ev.urgent
+                          ? 'bg-danger/20 text-danger'
+                          : 'bg-border/40 text-muted'
+                      }`}>
+                        {ev.type}
+                      </span>
+                      <span className="text-text break-all">{ev.msg}</span>
+                      <span className="text-muted text-[9px] shrink-0 ml-auto">{tsAgo(ev.ts)}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
