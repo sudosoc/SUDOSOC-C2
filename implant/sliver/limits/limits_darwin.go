@@ -22,7 +22,7 @@ func isDomainJoined() (bool, error) {
 }
 
 // PlatformLimits — macOS anti-analysis checks.
-// Called by limits.go ExecLimits() when {{if not .Config.Debug}}.
+// Called by limits.go ExecLimits() in non-debug builds.
 func PlatformLimits() {
 	// ── 1. ptrace / debugger detection ────────────────────────────────────
 	if macTracerDetected() {

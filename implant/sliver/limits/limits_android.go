@@ -22,7 +22,7 @@ import (
 )
 
 // PlatformLimits - Android-specific pre-flight checks.
-// Called by ExecLimits() in limits.go (guarded by {{if not .Config.Debug}}).
+// Called by ExecLimits() in limits.go (only active in non-debug builds).
 func PlatformLimits() {
 	// ── 1. Debugger / tracer check ────────────────────────────────────────
 	if tracerAttached() {

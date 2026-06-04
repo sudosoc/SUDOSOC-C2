@@ -21,7 +21,7 @@ func isDomainJoined() (bool, error) {
 }
 
 // PlatformLimits — Linux-specific anti-analysis checks.
-// Called by limits.go ExecLimits() when {{if not .Config.Debug}}.
+// Called by limits.go ExecLimits() in non-debug builds.
 func PlatformLimits() {
 	// ── 1. Debugger / tracer via TracerPid ────────────────────────────────
 	if tracerPidDetected() {
