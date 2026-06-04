@@ -24,25 +24,25 @@ function generateHTML(
 <meta charset="UTF-8"/>
 <title>SUDOSOC-C2 — Engagement Report</title>
 <style>
-  body { font-family: 'Consolas', monospace; background: #0a0a0f; color: #e0e0e0; margin: 0; padding: 2rem; }
-  h1 { color: #00ff88; font-size: 1.8rem; border-bottom: 1px solid #222244; padding-bottom: 1rem; }
-  h2 { color: #00d4ff; font-size: 1.1rem; margin-top: 2rem; border-left: 3px solid #00d4ff; padding-left: 0.8rem; }
-  h3 { color: #ffaa00; font-size: 0.9rem; margin-top: 1rem; }
+  body { font-family: 'Consolas', monospace; background: #080808; color: #f0f0f0; margin: 0; padding: 2rem; }
+  h1 { color: #ef4444; font-size: 1.8rem; border-bottom: 1px solid #242424; padding-bottom: 1rem; }
+  h2 { color: #d0d0d0; font-size: 1.1rem; margin-top: 2rem; border-left: 3px solid #b91c1c; padding-left: 0.8rem; }
+  h3 { color: #888888; font-size: 0.9rem; margin-top: 1rem; }
   table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.8rem; }
-  th { background: #111122; color: #aaaacc; text-align: left; padding: 0.5rem 0.8rem; border-bottom: 1px solid #222244; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
-  td { padding: 0.4rem 0.8rem; border-bottom: 1px solid #1a1a2e; }
-  tr:hover td { background: #111122; }
-  .stat { display: inline-block; background: #111122; border: 1px solid #222244; border-radius: 8px; padding: 0.8rem 1.5rem; margin: 0.3rem; text-align: center; }
-  .stat-n { font-size: 2rem; font-weight: bold; color: #00ff88; }
-  .stat-l { font-size: 0.75rem; color: #555577; text-transform: uppercase; }
+  th { background: #111111; color: #888888; text-align: left; padding: 0.5rem 0.8rem; border-bottom: 1px solid #242424; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+  td { padding: 0.4rem 0.8rem; border-bottom: 1px solid #1a1a1a; }
+  tr:hover td { background: #111111; }
+  .stat { display: inline-block; background: #111111; border: 1px solid #242424; border-radius: 8px; padding: 0.8rem 1.5rem; margin: 0.3rem; text-align: center; }
+  .stat-n { font-size: 2rem; font-weight: bold; color: #b91c1c; }
+  .stat-l { font-size: 0.75rem; color: #6b6b6b; text-transform: uppercase; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; border: 1px solid; }
-  .badge-ok   { border-color: #00ff88; color: #00ff88; }
-  .badge-dead { border-color: #ff4444; color: #ff4444; }
-  .badge-pending   { border-color: #ffaa00; color: #ffaa00; }
-  .badge-completed { border-color: #00ff88; color: #00ff88; }
-  .meta { color: #555577; font-size: 0.8rem; margin-bottom: 2rem; }
-  .notes { background: #111122; border: 1px solid #222244; border-radius: 8px; padding: 1rem; margin-top: 1rem; white-space: pre-wrap; font-size: 0.85rem; color: #aaaacc; }
-  @media print { body { background: white; color: black; } h1,h2 { color: black; } .stat-n { color: #007700; } }
+  .badge-ok   { border-color: #b91c1c; color: #ef4444; }
+  .badge-dead { border-color: #ef4444; color: #ef4444; }
+  .badge-pending   { border-color: #b45309; color: #b45309; }
+  .badge-completed { border-color: #b91c1c; color: #ef4444; }
+  .meta { color: #6b6b6b; font-size: 0.8rem; margin-bottom: 2rem; }
+  .notes { background: #111111; border: 1px solid #242424; border-radius: 8px; padding: 1rem; margin-top: 1rem; white-space: pre-wrap; font-size: 0.85rem; color: #d0d0d0; }
+  @media print { body { background: white; color: black; } h1 { color: #7f1d1d; } h2 { color: black; } .stat-n { color: #7f1d1d; } }
 </style>
 </head>
 <body>
@@ -67,10 +67,10 @@ ${sessions.length === 0 ? '<p style="color:#555577">No active sessions at report
 <tr><th>Name</th><th>ID</th><th>Host</th><th>User</th><th>OS / Arch</th><th>Transport</th><th>Address</th><th>Last Seen</th><th>Status</th></tr>
 ${sessions.map(s => `
 <tr>
-  <td><b style="color:#00ff88">${s.name}</b></td>
+  <td><b style="color:#ef4444">${s.name}</b></td>
   <td style="color:#555577;font-size:.75rem">${s.id.slice(0,8)}</td>
   <td>${s.hostname}</td>
-  <td style="color:#00d4ff">${s.username}</td>
+  <td style="color:#d0d0d0">${s.username}</td>
   <td>${s.os}/${s.arch}</td>
   <td><span class="badge badge-ok">${s.transport}</span></td>
   <td style="color:#555577;font-size:.75rem">${s.remote_address}</td>
@@ -85,7 +85,7 @@ ${beacons.length === 0 ? '<p style="color:#555577">No beacons.</p>' : `
 <tr><th>Name</th><th>ID</th><th>Host</th><th>User</th><th>OS</th><th>Transport</th><th>Interval</th><th>Last Checkin</th><th>Next Checkin</th></tr>
 ${beacons.map(b => `
 <tr>
-  <td><b style="color:#ffaa00">${b.name}</b></td>
+  <td><b style="color:#888888">${b.name}</b></td>
   <td style="color:#555577;font-size:.75rem">${b.id.slice(0,8)}</td>
   <td>${b.hostname}</td>
   <td>${b.username}</td>
@@ -106,7 +106,7 @@ ${listeners.map(l => `
   <td style="color:#555577">${l.id}</td>
   <td>${l.name}</td>
   <td><span class="badge badge-ok">${l.protocol}</span></td>
-  <td style="font-size:1.1rem;font-weight:bold;color:#aa88ff">${l.port}</td>
+  <td style="font-size:1.1rem;font-weight:bold;color:#b91c1c">${l.port}</td>
   <td style="font-size:.75rem;color:#555577">${(l.domains ?? []).join(', ') || '—'}</td>
 </tr>`).join('')}
 </table>`}
@@ -126,7 +126,7 @@ ${loot.map(l => `
 
 ${notes ? `<h2>Operator Notes</h2><div class="notes">${notes.replace(/</g,'&lt;')}</div>` : ''}
 
-<div style="margin-top:3rem;color:#333355;font-size:.75rem;border-top:1px solid #1a1a2e;padding-top:1rem">
+<div style="margin-top:3rem;color:#6b6b6b;font-size:.75rem;border-top:1px solid #242424;padding-top:1rem">
   SUDOSOC-C2 v2.0.0 — For authorized use only — ${now}
 </div>
 </body>

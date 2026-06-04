@@ -38,12 +38,12 @@ function StatCard({
 
 function KillChainBar({ sessions, beacons, listeners }: { sessions: number; beacons: number; listeners: number }) {
   const stages = [
-    { label: 'Recon',         done: listeners > 0, color: '#aa88ff' },
-    { label: 'Delivery',      done: listeners > 0, color: '#aa88ff' },
-    { label: 'Exploitation',  done: sessions + beacons > 0, color: '#ffaa00' },
-    { label: 'Installation',  done: sessions + beacons > 0, color: '#ffaa00' },
-    { label: 'C2',            done: sessions + beacons > 0, color: '#00d4ff' },
-    { label: 'Actions',       done: sessions > 0, color: '#ff4444' },
+    { label: 'Recon',         done: listeners > 0,           color: '#6b6b6b' },
+    { label: 'Delivery',      done: listeners > 0,           color: '#888888' },
+    { label: 'Exploitation',  done: sessions + beacons > 0,  color: '#b45309' },
+    { label: 'Installation',  done: sessions + beacons > 0,  color: '#b45309' },
+    { label: 'C2',            done: sessions + beacons > 0,  color: '#d0d0d0' },
+    { label: 'Actions',       done: sessions > 0,            color: '#b91c1c' },
   ]
   return (
     <div className="rounded-xl border border-border bg-surface p-4 flex flex-col gap-3">
@@ -55,7 +55,7 @@ function KillChainBar({ sessions, beacons, listeners }: { sessions: number; beac
         {stages.map((s, i) => (
           <div key={s.label} className="flex-1 flex flex-col gap-1">
             <div className="h-2 rounded-full transition-all"
-              style={{ background: s.done ? s.color : '#1a1a2e', boxShadow: s.done ? `0 0 6px ${s.color}40` : 'none' }} />
+              style={{ background: s.done ? s.color : '#1a1a1a', boxShadow: s.done ? `0 0 6px ${s.color}50` : 'none' }} />
             <div className="text-[8px] text-center" style={{ color: s.done ? s.color : '#555577' }}>
               {s.label}
             </div>
@@ -131,11 +131,11 @@ export default function Dashboard({ onOpenTerminal }: Props) {
 
       {/* ── Stat cards row ──────────────────────────────────────────────── */}
       <div className="flex gap-3 flex-wrap shrink-0">
-        <StatCard icon={Crosshair} label="Agents"    value={sL ? '…' : totalAgents}   color="#ff4444" sub={`${s.sessions} sessions · ${s.beacons} beacons`} />
-        <StatCard icon={Monitor}   label="Sessions"  value={sL ? '…' : s.sessions}    color="#00d4ff" sub="Interactive shells" />
-        <StatCard icon={Radio}     label="Beacons"   value={sL ? '…' : s.beacons}     color="#ffaa00" sub="Async task queue" />
-        <StatCard icon={Antenna}   label="Listeners" value={sL ? '…' : s.listeners}   color="#aa88ff" sub={lstList.map(l=>`${l.protocol}:${l.port}`).join(' · ') || 'None active'} />
-        <StatCard icon={Users}     label="Operators" value={sL ? '…' : s.operators}   color="#00ff88" sub="Online operators" />
+        <StatCard icon={Crosshair} label="Agents"    value={sL ? '…' : totalAgents}   color="#b91c1c" sub={`${s.sessions} sessions · ${s.beacons} beacons`} />
+        <StatCard icon={Monitor}   label="Sessions"  value={sL ? '…' : s.sessions}    color="#d0d0d0" sub="Interactive shells" />
+        <StatCard icon={Radio}     label="Beacons"   value={sL ? '…' : s.beacons}     color="#888888" sub="Async task queue" />
+        <StatCard icon={Antenna}   label="Listeners" value={sL ? '…' : s.listeners}   color="#6b6b6b" sub={lstList.map(l=>`${l.protocol}:${l.port}`).join(' · ') || 'None active'} />
+        <StatCard icon={Users}     label="Operators" value={sL ? '…' : s.operators}   color="#f0f0f0" sub="Online operators" />
       </div>
 
       {/* ── Kill chain ──────────────────────────────────────────────────── */}
@@ -147,9 +147,9 @@ export default function Dashboard({ onOpenTerminal }: Props) {
         {/* Active agents (left) */}
         <div className="flex-1 flex flex-col gap-2 min-h-0 min-w-0">
           <div className="text-[10px] text-muted uppercase tracking-widest flex items-center gap-1.5">
-            <Crosshair size={11} className="text-[#ff4444]" />
+            <Crosshair size={11} className="text-primary" />
             Active Agents
-            <span className="text-[#ff4444] font-bold">{totalAgents}</span>
+            <span className="text-primary font-bold">{totalAgents}</span>
           </div>
           <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-surface">
             {totalAgents === 0 ? (

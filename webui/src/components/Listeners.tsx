@@ -6,7 +6,7 @@ import { Antenna, Plus, X, RefreshCw, Square, Play, ChevronDown } from 'lucide-r
 // ─── Protocol metadata ────────────────────────────────────────────────────────
 
 const PROTOCOLS = [
-  { value: 'mtls',  label: 'mTLS',       default_port: 8888,  color: 'text-primary', desc: 'Mutual TLS 1.3 — certificate pinned' },
+  { value: 'mtls',  label: 'mTLS',       default_port: 31337, color: 'text-primary', desc: 'Mutual TLS 1.3 — certificate pinned' },
   { value: 'https', label: 'HTTPS',      default_port: 443,   color: 'text-accent',  desc: 'HTTPS with domain fronting support' },
   { value: 'http',  label: 'HTTP',       default_port: 80,    color: 'text-warn',    desc: 'Plain HTTP' },
   { value: 'dns',   label: 'DNS/DoH',    default_port: 53,    color: 'text-purple',  desc: 'DNS-over-HTTPS — survives all firewalls' },
@@ -27,7 +27,7 @@ export default function Listeners() {
   const [showNew,    setShowNew]    = useState(false)
   const [proto,      setProto]      = useState('mtls')
   const [host,       setHost]       = useState('')
-  const [port,       setPort]       = useState(8888)
+  const [port,       setPort]       = useState(31337)
   const [domains,    setDomains]    = useState('')
   const [starting,   setStarting]   = useState(false)
   const [stopping,   setStopping]   = useState<number | null>(null)

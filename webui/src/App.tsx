@@ -50,26 +50,51 @@ interface NavItem {
   badge?: string
 }
 
-const NAV: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard',    icon: LayoutDashboard, color: '#d0d0d0' },
-  { id: 'agents',    label: 'Agents',       icon: Crosshair,       color: '#b91c1c' },
-  { id: 'sessions',  label: 'Sessions',     icon: Monitor,         color: '#d0d0d0' },
-  { id: 'beacons',   label: 'Beacons',      icon: Radio,           color: '#d0d0d0' },
-  // ── OS-specific panels ─────────────────────────────────────────────────────
-  { id: 'windows',   label: 'Windows',      icon: Monitor,         color: '#b91c1c' },
-  { id: 'linux',     label: 'Linux',        icon: Shield,          color: '#d0d0d0' },
-  { id: 'macos',     label: 'macOS',        icon: Cpu,             color: '#d0d0d0' },
-  { id: 'android',   label: 'Android',      icon: Smartphone,      color: '#d0d0d0' },
-  // ── Infrastructure ─────────────────────────────────────────────────────────
-  { id: 'listeners', label: 'Listeners',    icon: Antenna,         color: '#d0d0d0' },
-  { id: 'loot',      label: 'Loot',         icon: Package,         color: '#d0d0d0' },
-  { id: 'netmap',    label: 'Network Map',  icon: MapIcon,         color: '#d0d0d0' },
-  { id: 'generate',  label: 'Generate',     icon: Cpu,             color: '#d0d0d0' },
-  { id: 'reports',   label: 'Reports',      icon: FileText,        color: '#6b6b6b' },
-  { id: 'ai',        label: 'AI Agent',     icon: Bot,             color: '#6b6b6b' },
+// ─── Nav groups — gives the sidebar visual structure ─────────────────────────
+interface NavGroup { label: string; items: NavItem[] }
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Operations',
+    items: [
+      { id: 'dashboard', label: 'Dashboard',   icon: LayoutDashboard, color: '#d0d0d0' },
+      { id: 'agents',    label: 'All Agents',  icon: Crosshair,       color: '#b91c1c' },
+    ],
+  },
+  {
+    label: 'Targets',
+    items: [
+      { id: 'windows',   label: 'Windows',     icon: Monitor,         color: '#b91c1c' },
+      { id: 'linux',     label: 'Linux',       icon: Shield,          color: '#d0d0d0' },
+      { id: 'macos',     label: 'macOS',       icon: Cpu,             color: '#d0d0d0' },
+      { id: 'android',   label: 'Android',     icon: Smartphone,      color: '#d0d0d0' },
+    ],
+  },
+  {
+    label: 'C2',
+    items: [
+      { id: 'sessions',  label: 'Sessions',    icon: Monitor,         color: '#d0d0d0' },
+      { id: 'beacons',   label: 'Beacons',     icon: Radio,           color: '#d0d0d0' },
+      { id: 'listeners', label: 'Listeners',   icon: Antenna,         color: '#d0d0d0' },
+    ],
+  },
+  {
+    label: 'Toolkit',
+    items: [
+      { id: 'generate',  label: 'Generate',    icon: Cpu,             color: '#d0d0d0' },
+      { id: 'loot',      label: 'Loot',        icon: Package,         color: '#d0d0d0' },
+      { id: 'netmap',    label: 'Network Map', icon: MapIcon,         color: '#d0d0d0' },
+      { id: 'reports',   label: 'Reports',     icon: FileText,        color: '#6b6b6b' },
+      { id: 'ai',        label: 'AI Agent',    icon: Bot,             color: '#b91c1c' },
+    ],
+  },
 ]
+
+// Flat NAV for existing lookup code
+const NAV: NavItem[] = NAV_GROUPS.flatMap(g => g.items)
+
 const NAV_BOTTOM: NavItem[] = [
-  { id: 'settings',  label: 'Settings',     icon: Settings2,       color: '#7070a0' },
+  { id: 'settings',  label: 'Settings',     icon: Settings2,       color: '#6b6b6b' },
 ]
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -182,36 +207,49 @@ export default function App() {
           )}
         </div>
 
-        {/* Nav items */}
-        <div className="flex-1 overflow-y-auto py-2 flex flex-col gap-0.5 px-1.5">
-          {NAV.map(item => {
-            const Icon   = item.icon
-            const active = activeTab === item.id
-            const isAgents = item.id === 'agents'
-            return (
-              <button key={item.id}
-                onClick={() => { setActiveTab(item.id); if (!sidebarOpen) setSidebarOpen(true) }}
-                title={sidebarOpen ? undefined : item.label}
-                className={`flex items-center gap-2.5 px-2 py-2 rounded-md text-xs transition-all group ${
-                  active
-                    ? 'font-semibold'
-                    : 'text-muted hover:text-text hover:bg-white/5'
-                } ${sidebarOpen ? '' : 'justify-center'}`}
-                style={active ? { background: item.color + '18', color: item.color } : {}}>
-                <Icon size={15} className="shrink-0" style={active ? { color: item.color } : {}} />
-                {sidebarOpen && <span className="truncate">{item.label}</span>}
-                {/* Badge for Agents */}
-                {isAgents && totalAgents > 0 && (
-                  <span className={`ml-auto shrink-0 rounded-full text-[9px] font-bold px-1.5 py-0.5 ${
-                    sidebarOpen ? '' : 'hidden'
-                  }`}
-                  style={{ background: '#ff444433', color: '#ff4444' }}>
-                    {totalAgents}
-                  </span>
-                )}
-              </button>
-            )
-          })}
+        {/* Nav items — grouped */}
+        <div className="flex-1 overflow-y-auto py-1 flex flex-col px-1.5">
+          {NAV_GROUPS.map(group => (
+            <div key={group.label} className="mb-1">
+              {/* Section label (only when sidebar open) */}
+              {sidebarOpen && (
+                <div className="px-2 py-1.5 text-[8px] font-bold tracking-[0.15em] text-muted/50 uppercase select-none">
+                  {group.label}
+                </div>
+              )}
+              {/* Divider when collapsed */}
+              {!sidebarOpen && (
+                <div className="my-1 mx-2 border-t border-border/30" />
+              )}
+              <div className="flex flex-col gap-0.5">
+                {group.items.map(item => {
+                  const Icon     = item.icon
+                  const active   = activeTab === item.id
+                  const isAgents = item.id === 'agents'
+                  return (
+                    <button key={item.id}
+                      onClick={() => { setActiveTab(item.id); if (!sidebarOpen) setSidebarOpen(true) }}
+                      title={sidebarOpen ? undefined : item.label}
+                      className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs transition-all group ${
+                        active
+                          ? 'font-semibold'
+                          : 'text-muted hover:text-text hover:bg-white/5'
+                      } ${sidebarOpen ? '' : 'justify-center'}`}
+                      style={active ? { background: item.color + '18', color: item.color } : {}}>
+                      <Icon size={14} className="shrink-0" style={active ? { color: item.color } : {}} />
+                      {sidebarOpen && <span className="truncate">{item.label}</span>}
+                      {isAgents && totalAgents > 0 && sidebarOpen && (
+                        <span className="ml-auto shrink-0 rounded-full text-[9px] font-bold px-1.5 py-0.5"
+                          style={{ background: '#b91c1c33', color: '#ef4444' }}>
+                          {totalAgents}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Collapse toggle (when closed) */}

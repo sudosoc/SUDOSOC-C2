@@ -226,7 +226,8 @@ export default function AI() {
               {sessions!.slice(0,3).map(s => (
                 <div key={s.id} className="text-[9px] text-muted truncate">
                   {s.os?.toLowerCase().includes('windows') ? '🪟' :
-                   s.os?.toLowerCase().includes('android') ? '🤖' : '🐧'}
+                   s.os?.toLowerCase().includes('android') ? '🤖' :
+                   (s.os?.toLowerCase().includes('darwin') || s.os?.toLowerCase().includes('mac')) ? '🍎' : '🐧'}
                   {' '}{s.name}
                 </div>
               ))}

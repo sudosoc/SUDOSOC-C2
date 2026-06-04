@@ -30,10 +30,10 @@ interface CtxState {
 // ─── Styling ──────────────────────────────────────────────────────────────────
 
 const COLORS = {
-  c2:       { fill: '#00ff8822', stroke: '#00ff88', text: '#00ff88' },
-  session:  { fill: '#00d4ff22', stroke: '#00d4ff', text: '#00d4ff' },
-  beacon:   { fill: '#ffaa0022', stroke: '#ffaa00', text: '#ffaa00' },
-  listener: { fill: '#aa88ff22', stroke: '#aa88ff', text: '#aa88ff' },
+  c2:       { fill: '#b91c1c22', stroke: '#b91c1c', text: '#ef4444' },
+  session:  { fill: '#d0d0d015', stroke: '#d0d0d0', text: '#f0f0f0' },
+  beacon:   { fill: '#88888820', stroke: '#888888', text: '#d0d0d0' },
+  listener: { fill: '#6b6b6b20', stroke: '#6b6b6b', text: '#888888' },
 }
 const RADIUS = { c2: 32, session: 22, beacon: 20, listener: 16 }
 

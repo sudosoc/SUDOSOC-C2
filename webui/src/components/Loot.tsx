@@ -27,7 +27,7 @@ export default function Loot() {
   return (
     <div className="flex flex-col gap-4 h-full">
       <div className="flex items-center justify-between">
-        <h2 className="text-purple font-bold text-lg flex items-center gap-2">
+        <h2 className="text-primary font-bold text-lg flex items-center gap-2">
           <Package size={18} /> Loot
           <span className="text-muted text-sm font-normal ml-1">({loot.length})</span>
         </h2>
