@@ -15,15 +15,20 @@ import type { Session } from '../types'
 import {
   Monitor, RefreshCw, Terminal, FolderOpen, Send, Loader,
   Download, Copy, CheckCheck, ChevronRight, ChevronDown, Upload,
-  Search, Hash, X, LayoutDashboard, Cpu, Wifi,
-  Activity, Package, List,
+  Search, Hash, X, LayoutDashboard, Wifi,
+  Activity, Package, List, Cpu, Camera, Trash2, FolderPlus,
+  Shield, Globe,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface ExecResult  { stdout: string; stderr: string; exit_code: number }
-interface FileInfo    { name: string; is_dir: boolean; size: number; mod_time: number; mode?: string }
-interface LsResp      { path: string; files: FileInfo[] }
-interface Task        { id: number; cmd: string; result: string; ok: boolean; ts: number; open: boolean }
+interface ExecResult   { stdout: string; stderr: string; exit_code: number }
+interface FileInfo     { name: string; is_dir: boolean; size: number; mod_time: number; mode?: string }
+interface LsResp       { path: string; files: FileInfo[] }
+interface Task         { id: number; cmd: string; result: string; ok: boolean; ts: number; open: boolean }
+interface ProcessInfo  { pid: number; ppid: number; executable: string; owner: string; arch: string; cmdline: string[] }
+interface PrivInfo     { name: string; description: string; enabled: boolean }
+interface NetIface     { name: string; hw_addr: string; ip_addresses: string[] }
+interface NetSocket    { local_addr: string; peer_addr: string; protocol: string; state: string; uid: number }
 
 export interface Category {
   id: string; icon: string; label: string; atkId: string
@@ -140,23 +145,60 @@ function FileManager({ sessionId, config, onExec }: {
   config: OSConfig
   onExec: (cmd: string, label: string) => void
 }) {
-  const [path,    setPath]    = useState(config.defaultFs)
-  const [data,    setData]    = useState<LsResp | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [search,  setSearch]  = useState('')
-  const [sortCol, setSortCol] = useState<'name'|'size'|'mod'>('name')
-  const [sortAsc, setSortAsc] = useState(true)
-  const uploadRef = useRef<HTMLInputElement>(null)
+  const [path,     setPath]     = useState(config.defaultFs)
+  const [data,     setData]     = useState<LsResp | null>(null)
+  const [loading,  setLoading]  = useState(false)
+  const [lsError,  setLsError]  = useState<string | null>(null)
+  const [search,   setSearch]   = useState('')
+  const [sortCol,  setSortCol]  = useState<'name'|'size'|'mod'>('name')
+  const [sortAsc,  setSortAsc]  = useState(true)
+  const uploadRef  = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [mkdirName, setMkdirName] = useState('')
+  const [showMkdir, setShowMkdir] = useState(false)
+
+  // Quick-nav paths shown when ls fails (permission denied on /)
+  const QUICK_PATHS = config.defaultFs.includes('\\')
+    ? ['C:\\', 'C:\\Users', 'C:\\Windows\\Temp', 'C:\\inetpub']
+    : config.defaultFs.startsWith('/sdcard')
+    ? ['/sdcard', '/sdcard/Download', '/sdcard/DCIM', '/data/local/tmp']
+    : ['/', '/home', '/tmp', '/var', '/etc', '/opt']
 
   async function ls(p: string) {
-    setLoading(true)
+    setLoading(true); setLsError(null)
     try {
       const r = await apiFetch<LsResp>(`/api/sessions/${sessionId}/ls?path=${encodeURIComponent(p)}`)
       setPath(r.path); setData(r)
     } catch (e) {
-      onExec(`ls -la "${p}"`, `ls ${p}`)
+      const msg = String(e)
+      setLsError(msg)
+      // Don't fall back to exec for every error — only for non-permission errors
+      if (!msg.toLowerCase().includes('permission') && !msg.toLowerCase().includes('denied')) {
+        onExec(`ls -la "${p}"`, `ls ${p}`)
+      }
     } finally { setLoading(false) }
+  }
+
+  async function mkdir() {
+    if (!mkdirName.trim()) return
+    const newPath = config.joinPath(path, mkdirName.trim())
+    try {
+      await apiFetch(`/api/sessions/${sessionId}/mkdir`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: newPath }),
+      })
+      setMkdirName(''); setShowMkdir(false); ls(path)
+    } catch (e) { alert('mkdir failed: ' + e) }
+  }
+
+  async function deleteItem(name: string, isDir: boolean) {
+    if (!confirm(`Delete "${name}"?`)) return
+    const full = config.joinPath(path, name)
+    try {
+      await apiFetch(`/api/sessions/${sessionId}/rm?path=${encodeURIComponent(full)}${isDir ? '&recursive=true' : ''}`, { method: 'DELETE' })
+      ls(path)
+    } catch (e) { alert('rm failed: ' + e) }
   }
 
   useEffect(() => { ls(path) }, []) // eslint-disable-line
@@ -231,13 +273,17 @@ function FileManager({ sessionId, config, onExec }: {
           className="text-muted hover:text-primary shrink-0 flex items-center gap-1 text-[9px]">
           {uploading ? <Loader size={10} className="animate-spin" /> : <Upload size={10} />}
         </button>
+        <button onClick={() => setShowMkdir(v => !v)} title="New Folder"
+          className="text-muted hover:text-primary shrink-0">
+          <FolderPlus size={10} />
+        </button>
         <input ref={uploadRef} type="file" className="hidden"
           onChange={e => e.target.files?.[0] && upload(e.target.files[0])} />
       </div>
 
       {/* Column headers */}
       <div className="shrink-0 grid text-[9px] font-bold text-muted uppercase tracking-wider px-3 py-1.5 border-b border-border/50 bg-surface/20"
-        style={{ gridTemplateColumns: '24px 1fr 80px 130px 32px' }}>
+        style={{ gridTemplateColumns: '24px 1fr 80px 130px 52px' }}>
         <span />
         <button onClick={() => sortBy('name')} className="text-left flex items-center gap-1 hover:text-text">
           Name <SortIcon col="name" />
@@ -251,19 +297,47 @@ function FileManager({ sessionId, config, onExec }: {
         <span />
       </div>
 
+      {/* Permission denied / error → show quick-nav */}
+      {lsError && (
+        <div className="shrink-0 px-3 py-2 border-b border-danger/30 bg-danger/5">
+          <div className="text-[9px] text-danger mb-2 truncate">{lsError}</div>
+          <div className="flex flex-wrap gap-1">
+            {QUICK_PATHS.map(p => (
+              <button key={p} onClick={() => ls(p)}
+                className="text-[9px] px-2 py-0.5 rounded border border-border text-muted hover:text-primary hover:border-primary/40 font-mono transition-colors">
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Mkdir form */}
+      {showMkdir && (
+        <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-surface/30">
+          <FolderPlus size={10} className="text-primary shrink-0" />
+          <input value={mkdirName} onChange={e => setMkdirName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') mkdir(); if (e.key === 'Escape') setShowMkdir(false) }}
+            autoFocus placeholder="New folder name…"
+            className="flex-1 bg-bg border border-border rounded px-2 py-0.5 text-[10px] text-text outline-none focus:border-primary" />
+          <button onClick={mkdir} className="text-primary text-[10px] px-2 py-0.5 rounded border border-primary/40 hover:bg-primary/10">Create</button>
+          <button onClick={() => setShowMkdir(false)} className="text-muted hover:text-text"><X size={10} /></button>
+        </div>
+      )}
+
       {/* File list */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center p-8"><Loader size={16} className="text-muted animate-spin" /></div>
-        ) : files.length === 0 ? (
+        ) : files.length === 0 && !lsError ? (
           <div className="p-6 text-muted text-xs text-center">{search ? 'No matches' : 'Empty directory'}</div>
-        ) : (
+        ) : lsError && files.length === 0 ? null : (
           files.map((f, i) => (
             <div key={f.name}
               className={`grid items-center px-3 py-1.5 border-b border-border/15 hover:bg-white/4 group transition-colors cursor-default ${
                 f.is_dir ? 'hover:bg-primary/5' : ''
               }`}
-              style={{ gridTemplateColumns: '24px 1fr 80px 130px 32px' }}>
+              style={{ gridTemplateColumns: '24px 1fr 80px 130px 52px' }}>
               {/* Icon */}
               <span className="text-sm leading-none select-none">{fileIcon(f.name, f.is_dir)}</span>
               {/* Name */}
@@ -282,15 +356,18 @@ function FileManager({ sessionId, config, onExec }: {
               <span className="text-[9px] text-muted/60 tabular-nums pl-1">
                 {fmtDate(f.mod_time)}
               </span>
-              {/* Download */}
-              <div className="flex justify-center">
+              {/* Actions */}
+              <div className="flex items-center justify-center gap-1">
                 {!f.is_dir && (
-                  <button onClick={() => download(f.name)}
-                    title="Download"
+                  <button onClick={() => download(f.name)} title="Download"
                     className="text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-all">
-                    <Download size={11} />
+                    <Download size={10} />
                   </button>
                 )}
+                <button onClick={() => deleteItem(f.name, f.is_dir)} title="Delete"
+                  className="text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-all">
+                  <Trash2 size={10} />
+                </button>
               </div>
             </div>
           ))
@@ -431,6 +508,161 @@ function ModuleAccordion({ modules, running, onExec, search, onSearch }: {
   )
 }
 
+// ─── Process Manager ─────────────────────────────────────────────────────────
+function ProcessManager({ sessionId }: { sessionId: string }) {
+  const { data, loading, error, refresh } = useAPI<ProcessInfo[]>(`/api/sessions/${sessionId}/ps`, 0)
+  const [filter, setFilter]   = useState('')
+  const [killing, setKilling] = useState<number | null>(null)
+  const [killMsg, setKillMsg] = useState<string | null>(null)
+
+  const procs = (data ?? []).filter(p =>
+    !filter || p.executable?.toLowerCase().includes(filter.toLowerCase()) ||
+               String(p.pid).includes(filter) || p.owner?.toLowerCase().includes(filter.toLowerCase())
+  )
+
+  async function killProc(pid: number) {
+    setKilling(pid)
+    try {
+      await apiFetch(`/api/sessions/${sessionId}/ps/${pid}`, { method: 'DELETE' })
+      setKillMsg(`Process ${pid} terminated`)
+      setTimeout(() => setKillMsg(null), 3000)
+      refresh()
+    } catch (e) { setKillMsg(`Failed: ${e}`) }
+    finally { setKilling(null) }
+  }
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
+        <Activity size={11} className="text-primary shrink-0" />
+        <span className="text-[10px] text-muted font-bold uppercase tracking-wider">Processes</span>
+        {data && <span className="text-[9px] text-muted/60">{data.length} running</span>}
+        <div className="flex-1 flex items-center gap-1 bg-bg/60 border border-border rounded px-2 py-0.5 ml-2">
+          <Search size={9} className="text-muted shrink-0" />
+          <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="filter by name / pid / owner…"
+            className="flex-1 bg-transparent text-[9px] text-text placeholder-muted/50 outline-none" />
+        </div>
+        <button onClick={refresh} className="text-muted hover:text-primary shrink-0">
+          <RefreshCw size={10} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      {killMsg && <div className="shrink-0 px-3 py-1 text-[9px] text-primary bg-primary/10 border-b border-border">{killMsg}</div>}
+      {/* Column headers */}
+      <div className="shrink-0 grid text-[8px] font-bold text-muted/60 uppercase tracking-wider px-3 py-1 border-b border-border/30 bg-surface/20"
+        style={{ gridTemplateColumns: '56px 56px 1fr 120px 64px 32px' }}>
+        <span>PID</span><span>PPID</span><span>Executable</span><span>Owner</span><span>Arch</span><span />
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {loading ? (
+          <div className="flex items-center justify-center p-8"><Loader size={16} className="text-muted animate-spin" /></div>
+        ) : error ? (
+          <div className="p-4 text-danger text-xs text-center">{error}</div>
+        ) : procs.length === 0 ? (
+          <div className="p-4 text-muted text-xs text-center">No processes found</div>
+        ) : procs.map(p => (
+          <div key={p.pid}
+            className="grid items-center px-3 py-1 border-b border-border/15 hover:bg-white/4 group text-[10px] font-mono"
+            style={{ gridTemplateColumns: '56px 56px 1fr 120px 64px 32px' }}>
+            <span className="text-primary tabular-nums">{p.pid}</span>
+            <span className="text-muted/60 tabular-nums">{p.ppid}</span>
+            <div className="min-w-0">
+              <div className="text-text truncate">{p.executable}</div>
+              {p.cmdline?.length > 1 && (
+                <div className="text-muted/50 text-[8px] truncate">{p.cmdline.slice(1).join(' ')}</div>
+              )}
+            </div>
+            <span className="text-muted truncate">{p.owner}</span>
+            <span className="text-muted/60 text-[9px]">{p.arch}</span>
+            <button onClick={() => killProc(p.pid)} disabled={killing === p.pid}
+              className="text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-all disabled:opacity-40"
+              title={`Kill PID ${p.pid}`}>
+              {killing === p.pid ? <Loader size={10} className="animate-spin" /> : <X size={10} />}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Network View ────────────────────────────────────────────────────────────
+function NetworkView({ sessionId }: { sessionId: string }) {
+  const [tab, setTab] = useState<'ifaces'|'sockets'>('ifaces')
+  const { data: ifaces, loading: ifLoading, refresh: ifRefresh } = useAPI<NetIface[]>(`/api/sessions/${sessionId}/ifconfig`, 0)
+  const { data: sockets, loading: skLoading, refresh: skRefresh } = useAPI<NetSocket[]>(`/api/sessions/${sessionId}/netstat`, 0)
+  const [sockFilter, setSockFilter] = useState('')
+
+  const filteredSockets = (sockets ?? []).filter(s =>
+    !sockFilter || s.local_addr.includes(sockFilter) || s.peer_addr.includes(sockFilter) || s.state.toLowerCase().includes(sockFilter.toLowerCase())
+  )
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="shrink-0 flex items-center gap-0 border-b border-border">
+        {(['ifaces', 'sockets'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`px-4 py-2 text-[10px] border-b-2 transition-colors ${tab === t ? 'border-primary text-primary font-semibold' : 'border-transparent text-muted hover:text-text'}`}>
+            {t === 'ifaces' ? '🌐 Interfaces' : '🔌 Connections'}
+          </button>
+        ))}
+        <button onClick={() => tab === 'ifaces' ? ifRefresh() : skRefresh()}
+          className="ml-auto mr-3 text-muted hover:text-primary">
+          <RefreshCw size={10} className={(tab === 'ifaces' ? ifLoading : skLoading) ? 'animate-spin' : ''} />
+        </button>
+      </div>
+
+      {tab === 'ifaces' ? (
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {ifLoading && <div className="flex items-center justify-center p-8"><Loader size={16} className="text-muted animate-spin" /></div>}
+          {(ifaces ?? []).map(iface => (
+            <div key={iface.name} className="bg-surface border border-border rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Globe size={12} className="text-primary" />
+                <span className="text-xs font-bold text-text">{iface.name}</span>
+                {iface.hw_addr && <span className="text-[9px] text-muted font-mono">{iface.hw_addr}</span>}
+              </div>
+              <div className="space-y-0.5 pl-5">
+                {(iface.ip_addresses ?? []).map(ip => (
+                  <div key={ip} className="text-[10px] font-mono text-accent">{ip}</div>
+                ))}
+                {(iface.ip_addresses ?? []).length === 0 && <div className="text-[10px] text-muted/50">no addresses</div>}
+              </div>
+            </div>
+          ))}
+          {!ifLoading && (ifaces ?? []).length === 0 && <div className="p-4 text-muted text-xs text-center">No interfaces found</div>}
+        </div>
+      ) : (
+        <div className="flex flex-col h-full min-h-0">
+          <div className="shrink-0 px-3 py-1.5 border-b border-border">
+            <div className="flex items-center gap-1.5 bg-bg/60 border border-border rounded px-2 py-0.5">
+              <Search size={9} className="text-muted" />
+              <input value={sockFilter} onChange={e => setSockFilter(e.target.value)} placeholder="filter address / state…"
+                className="flex-1 bg-transparent text-[9px] text-text placeholder-muted/50 outline-none" />
+            </div>
+          </div>
+          <div className="shrink-0 grid text-[8px] font-bold text-muted/60 uppercase tracking-wider px-3 py-1 border-b border-border/30 bg-surface/20"
+            style={{ gridTemplateColumns: '60px 1fr 1fr 80px' }}>
+            <span>Proto</span><span>Local</span><span>Remote</span><span>State</span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {skLoading && <div className="flex items-center justify-center p-8"><Loader size={16} className="text-muted animate-spin" /></div>}
+            {filteredSockets.map((s, i) => (
+              <div key={i} className="grid items-center px-3 py-1 border-b border-border/15 hover:bg-white/4 text-[10px] font-mono"
+                style={{ gridTemplateColumns: '60px 1fr 1fr 80px' }}>
+                <span className="text-primary">{s.protocol}</span>
+                <span className="text-text truncate">{s.local_addr}</span>
+                <span className="text-muted truncate">{s.peer_addr || '—'}</span>
+                <span className={`text-[9px] ${s.state === 'ESTABLISHED' ? 'text-primary' : 'text-muted/60'}`}>{s.state}</span>
+              </div>
+            ))}
+            {!skLoading && filteredSockets.length === 0 && <div className="p-4 text-muted text-xs text-center">No connections found</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Overview view ────────────────────────────────────────────────────────────
 function Overview({ session, config, running, onExec, lastTask }: {
   session: Session; config: OSConfig; running: boolean
@@ -502,12 +734,14 @@ function Overview({ session, config, running, onExec, lastTask }: {
 }
 
 // ─── Nav item ─────────────────────────────────────────────────────────────────
-type ViewID = 'overview' | 'files' | 'modules' | 'tasks'
+type ViewID = 'overview' | 'files' | 'procs' | 'network' | 'modules' | 'tasks'
 const VIEWS: { id: ViewID; icon: React.ElementType; label: string }[] = [
-  { id: 'overview', icon: LayoutDashboard, label: 'Overview' },
-  { id: 'files',    icon: FolderOpen,      label: 'Files'    },
-  { id: 'modules',  icon: Package,         label: 'Modules'  },
-  { id: 'tasks',    icon: List,            label: 'Tasks'    },
+  { id: 'overview', icon: LayoutDashboard, label: 'Overview'   },
+  { id: 'files',    icon: FolderOpen,      label: 'Files'      },
+  { id: 'procs',    icon: Activity,        label: 'Processes'  },
+  { id: 'network',  icon: Wifi,            label: 'Network'    },
+  { id: 'modules',  icon: Package,         label: 'Modules'    },
+  { id: 'tasks',    icon: List,            label: 'Tasks'      },
 ]
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -524,13 +758,15 @@ export default function OSPanel({ config, onOpenTerminal }: Props) {
   const { data, loading, error, refresh } = useAPI<Session[]>('/api/sessions', 5_000)
   const sessions = (data ?? []).filter(config.filter)
 
-  const [selId,    setSelId]    = useState<string | null>(null)
-  const [view,     setView]     = useState<ViewID>('overview')
-  const [tasks,    setTasks]    = useState<Task[]>([])
-  const [running,  setRunning]  = useState(false)
-  const [custom,   setCustom]   = useState('')
-  const [search,   setSearch]   = useState('')
-  const [copied,   setCopied]   = useState<number | null>(null)
+  const [selId,       setSelId]      = useState<string | null>(null)
+  const [view,        setView]       = useState<ViewID>('overview')
+  const [tasks,       setTasks]      = useState<Task[]>([])
+  const [running,     setRunning]    = useState(false)
+  const [custom,      setCustom]     = useState('')
+  const [search,      setSearch]     = useState('')
+  const [copied,      setCopied]     = useState<number | null>(null)
+  const [screenshot,  setScreenshot] = useState<string | null>(null)
+  const [ssLoading,   setSsLoading]  = useState(false)
 
   const sel = sessions.find(s => s.id === selId) ?? null
 
@@ -559,8 +795,18 @@ export default function OSPanel({ config, onOpenTerminal }: Props) {
     setTasks(p => p.map(t => t.id === id ? { ...t, open: !t.open } : t))
   }
 
+  async function takeScreenshot() {
+    if (!selId) return
+    setSsLoading(true)
+    try {
+      const r = await apiFetch<{ data: string }>(`/api/sessions/${selId}/screenshot`)
+      setScreenshot(r.data ? `data:image/png;base64,${r.data}` : null)
+    } catch (e) { alert('Screenshot failed: ' + e) }
+    finally { setSsLoading(false) }
+  }
+
   function selectSession(id: string) {
-    setSelId(id); setTasks([]); setView('overview'); setCustom('')
+    setSelId(id); setTasks([]); setView('overview'); setCustom(''); setScreenshot(null)
   }
 
   return (
@@ -660,6 +906,12 @@ export default function OSPanel({ config, onOpenTerminal }: Props) {
                   {running ? <Loader size={10} className="animate-spin" /> : <Send size={10} />}
                 </button>
               </div>
+              {/* Screenshot */}
+              <button onClick={takeScreenshot} disabled={ssLoading}
+                title="Take screenshot"
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-border/60 text-[10px] text-muted hover:border-primary/40 hover:text-primary transition-colors disabled:opacity-40">
+                {ssLoading ? <Loader size={10} className="animate-spin" /> : <Camera size={10} />}
+              </button>
               {/* Terminal */}
               <button onClick={() => onOpenTerminal(selId, sel?.hostname)}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded border border-border/60 text-[10px] text-muted hover:border-primary/40 hover:text-primary transition-colors">
@@ -691,16 +943,34 @@ export default function OSPanel({ config, onOpenTerminal }: Props) {
           {/* View content */}
           <div className="flex-1 min-h-0 overflow-hidden">
             {view === 'overview' && sel && (
-              <Overview
-                session={sel}
-                config={config}
-                running={running}
-                onExec={exec}
-                lastTask={tasks[0] ?? null}
-              />
+              <>
+                <Overview
+                  session={sel}
+                  config={config}
+                  running={running}
+                  onExec={exec}
+                  lastTask={tasks[0] ?? null}
+                />
+                {/* Screenshot modal */}
+                {screenshot && (
+                  <div className="absolute inset-0 z-50 bg-bg/95 flex flex-col items-center justify-center p-4 gap-3">
+                    <div className="flex items-center justify-between w-full max-w-3xl">
+                      <span className="text-xs text-muted font-semibold">Screenshot — {sel.hostname}</span>
+                      <button onClick={() => setScreenshot(null)} className="text-muted hover:text-text"><X size={14} /></button>
+                    </div>
+                    <img src={screenshot} alt="screenshot" className="max-w-full max-h-[80vh] rounded border border-border object-contain" />
+                  </div>
+                )}
+              </>
             )}
             {view === 'files' && (
               <FileManager sessionId={selId} config={config} onExec={exec} />
+            )}
+            {view === 'procs' && selId && (
+              <ProcessManager sessionId={selId} />
+            )}
+            {view === 'network' && selId && (
+              <NetworkView sessionId={selId} />
             )}
             {view === 'modules' && (
               <ModuleAccordion

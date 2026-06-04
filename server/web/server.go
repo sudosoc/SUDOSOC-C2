@@ -61,6 +61,18 @@ func buildRouter() *mux.Router {
 	api.HandleFunc("/sessions/{id}/upload",     handleUpload).Methods(http.MethodPost)
 	api.HandleFunc("/sessions/{id}/ps/{pid}",   handleTerminateProcess).Methods(http.MethodDelete)
 
+	// ── Advanced session operations ───────────────────────────────────
+	api.HandleFunc("/sessions/{id}/mkdir",      handleMkdir).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/rm",         handleRm).Methods(http.MethodDelete)
+	api.HandleFunc("/sessions/{id}/mv",         handleMv).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/env",        handleGetEnv).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/env",        handleSetEnv).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/ifconfig",   handleIfconfig).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/netstat",    handleNetstat).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/getprivs",   handleGetPrivs).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/getsystem",  handleGetSystem).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/pwd",        handlePWD).Methods(http.MethodGet)
+
 	// ── Beacon control ────────────────────────────────────────────────
 	api.HandleFunc("/beacons/{id}/tasks",            handleBeaconTasks).Methods(http.MethodGet)
 	api.HandleFunc("/beacons/{id}/tasks/{taskID}",   handleBeaconTaskContent).Methods(http.MethodGet)
