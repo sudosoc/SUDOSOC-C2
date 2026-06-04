@@ -98,6 +98,7 @@ func buildRouter() *mux.Router {
 	api.HandleFunc("/generate/options",  handleGenerateOptions).Methods(http.MethodGet)
 	api.HandleFunc("/generate",          handleGenerate).Methods(http.MethodPost)
 	api.HandleFunc("/generate/exec",     handleGenerateExec).Methods(http.MethodPost)
+	api.HandleFunc("/generate/pack",     handleGeneratePack).Methods(http.MethodPost)
 	api.HandleFunc("/generate/download", handleGenerateDownload).Methods(http.MethodGet)
 
 	// ── AI ─────────────────────────────────────────────────────────────

