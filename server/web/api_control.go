@@ -6,9 +6,13 @@ package web
 */
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -483,4 +487,125 @@ func buildGenerateCommand(req generateReq) string {
 	}
 	parts = append(parts, "--save /tmp/")
 	return strings.Join(parts, " ")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/generate/exec — Execute the generate command on the server
+// Runs the server binary with the generate subcommand and streams output.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type generateExecReq struct {
+	Command string `json:"command"`
+}
+
+type generateExecResp struct {
+	Output string `json:"output"`
+	Path   string `json:"path,omitempty"`
+}
+
+func handleGenerateExec(w http.ResponseWriter, r *http.Request) {
+	var body generateExecReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Command == "" {
+		jsonError(w, "command is required", http.StatusBadRequest)
+		return
+	}
+
+	// Extract the server binary path — we are the server, so use os.Executable
+	serverBin, err := os.Executable()
+	if err != nil {
+		jsonError(w, "cannot determine server binary: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the command into args
+	// The command looks like: generate --mtls host:port --os linux --arch amd64 ...
+	args := strings.Fields(body.Command)
+	if len(args) == 0 {
+		jsonError(w, "empty command", http.StatusBadRequest)
+		return
+	}
+
+	// The server supports a --exec-command flag for running console commands
+	// Build equivalent command via the server CLI: server generate ...
+	cmdArgs := append([]string{"--exec"}, args...)
+	cmd := exec.Command(serverBin, cmdArgs...)
+	cmd.Dir = filepath.Dir(serverBin)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	if err := cmd.Run(); err != nil {
+		// Even on error, return whatever output we got
+		_ = json.NewEncoder(w).Encode(generateExecResp{
+			Output: out.String() + "\n[-] Error: " + err.Error(),
+		})
+		return
+	}
+
+	// Try to find the generated binary path in the output
+	var binaryPath string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "Saved") || strings.Contains(line, "saved") ||
+			strings.Contains(line, "/slivers/") || strings.Contains(line, "/tmp/") {
+			parts := strings.Fields(line)
+			for _, p := range parts {
+				if filepath.IsAbs(p) {
+					if _, err := os.Stat(p); err == nil {
+						binaryPath = p
+						break
+					}
+				}
+			}
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(generateExecResp{
+		Output: out.String(),
+		Path:   binaryPath,
+	})
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/generate/download?path=/abs/path/to/binary
+// Download a previously generated binary by absolute path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+func handleGenerateDownload(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		jsonError(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	// Security: only allow paths under known safe directories
+	allowedPrefixes := []string{
+		"/tmp/",
+		"/root/.sudosoc/",
+		"/home/",
+		os.TempDir(),
+	}
+	allowed := false
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(filepath.Clean(path), filepath.Clean(prefix)) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		jsonError(w, "path not allowed", http.StatusForbidden)
+		return
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		jsonError(w, "file not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	fname := filepath.Base(path)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fname))
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, _ = w.Write(data)
 }
