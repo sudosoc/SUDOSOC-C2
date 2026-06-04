@@ -78,6 +78,30 @@ const MODULES: Category[] = [
       { icon: '🌐', label: 'Device Fingerprint',      cmd: 'echo === DEVICE ===; getprop ro.product.model; getprop ro.build.version.release; getprop ro.build.version.sdk; echo === NET ===; ip addr show | grep inet; echo === UID ===; id; echo === APPS ===; pm list packages -3 2>&1 | wc -l', tag: 'T1082' },
     ],
   },
+  {
+    id: 'root', icon: '💀', label: 'ROOT / PRIVESC', atkId: 'TA0004',
+    cmds: [
+      { icon: '🔑', label: 'Check Root Access',      cmd: 'su -c id 2>&1 || id; which su 2>&1',                                         tag: 'T1068' },
+      { icon: '🧪', label: 'Magisk Detection',       cmd: 'which magisk 2>&1; ls /sbin/magisk 2>/dev/null; ls /data/adb/magisk 2>/dev/null; getprop ro.magisk.version 2>&1', tag: 'T1068' },
+      { icon: '🔓', label: 'Check Frida Server',     cmd: 'ps | grep frida 2>&1; ls /data/local/tmp/frida* 2>/dev/null',                 tag: 'T1068' },
+      { icon: '🐚', label: 'ADB Shell Check',        cmd: 'getprop service.adb.root 2>&1; getprop ro.debuggable 2>&1; getprop ro.secure 2>&1', tag: 'T1068' },
+      { icon: '💉', label: 'Write /data/local/tmp', cmd: 'echo test > /data/local/tmp/test_write 2>&1 && echo writable && rm /data/local/tmp/test_write || echo denied', tag: 'T1574' },
+      { icon: '📱', label: 'Unlock Bootloader',      cmd: 'getprop ro.boot.flash.locked; getprop ro.boot.verifiedbootstate; getprop ro.crypto.state', tag: 'T1082' },
+      { icon: '⚡', label: 'CVE Check (Dirty Cow)',  cmd: 'uname -r; cat /proc/version 2>&1',                                           tag: 'T1068' },
+    ],
+  },
+  {
+    id: 'hunt', icon: '🎯', label: 'HUNT', atkId: 'TA0009',
+    cmds: [
+      { icon: '🔑', label: 'Hunt Auth Tokens',       cmd: 'find /sdcard -name "*.json" 2>&1 | xargs grep -l "token\\|auth\\|secret\\|key\\|password" 2>/dev/null | head -20', tag: 'T1552' },
+      { icon: '💾', label: 'Hunt DB Files',          cmd: 'find /sdcard -name "*.db" -o -name "*.sqlite" 2>&1 | head -20',               tag: 'T1005' },
+      { icon: '🔐', label: 'Hunt KeePass',           cmd: 'find /sdcard -name "*.kdbx" -o -name "*.kdb" 2>&1 | head -10',                tag: 'T1552' },
+      { icon: '📸', label: 'DCIM Photo Count',       cmd: 'ls /sdcard/DCIM 2>&1; find /sdcard/DCIM -name "*.jpg" -o -name "*.mp4" 2>&1 | wc -l', tag: 'T1533' },
+      { icon: '🌐', label: 'Browser Bookmarks',      cmd: 'find /sdcard -name "bookmarks*" -o -name "Browser" 2>&1 | head -10',          tag: 'T1005' },
+      { icon: '💬', label: 'WhatsApp DB Location',   cmd: 'find /sdcard -name "msgstore.db*" 2>&1 | head -5; ls /sdcard/WhatsApp/Databases/ 2>&1', tag: 'T1636' },
+      { icon: '📱', label: 'Telegram DB Location',   cmd: 'find /sdcard/Android/data -name "*.db" 2>&1 | grep telegram | head -5',       tag: 'T1636' },
+    ],
+  },
 ]
 
 function joinUnix(base: string, name: string) { return base.replace(/\/+$/, '') + '/' + name }
