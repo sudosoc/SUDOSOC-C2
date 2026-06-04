@@ -6,6 +6,9 @@ import Beacons    from './components/Beacons'
 import Listeners  from './components/Listeners'
 import Loot       from './components/Loot'
 import Android    from './components/Android'
+import Windows    from './components/Windows'
+import Linux      from './components/Linux'
+import MacOS      from './components/MacOS'
 import Generate   from './components/Generate'
 import AI         from './components/AI'
 import Settings   from './components/Settings'
@@ -34,7 +37,8 @@ interface EventEntry {
 
 // ─── Tab config ───────────────────────────────────────────────────────────────
 type TabID =
-  | 'dashboard' | 'agents'   | 'sessions'  | 'beacons'   | 'android'
+  | 'dashboard' | 'agents'   | 'sessions'  | 'beacons'
+  | 'windows'   | 'linux'    | 'macos'     | 'android'
   | 'listeners' | 'loot'     | 'netmap'    | 'generate'
   | 'reports'   | 'ai'       | 'settings'
 
@@ -47,17 +51,22 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard',    icon: LayoutDashboard, color: '#00e676' },
-  { id: 'agents',    label: 'Agents',       icon: Crosshair,       color: '#00e676' },
-  { id: 'sessions',  label: 'Sessions',     icon: Monitor,         color: '#29b6f6' },
-  { id: 'beacons',   label: 'Beacons',      icon: Radio,           color: '#ffa726' },
-  { id: 'android',   label: 'Android',      icon: Smartphone,      color: '#00e676' },
-  { id: 'listeners', label: 'Listeners',    icon: Antenna,         color: '#b39ddb' },
-  { id: 'loot',      label: 'Loot',         icon: Package,         color: '#b39ddb' },
-  { id: 'netmap',    label: 'Network Map',  icon: MapIcon,         color: '#29b6f6' },
-  { id: 'generate',  label: 'Generate',     icon: Cpu,             color: '#29b6f6' },
-  { id: 'reports',   label: 'Reports',      icon: FileText,        color: '#7070a0' },
-  { id: 'ai',        label: 'AI Agent',     icon: Bot,             color: '#b39ddb' },
+  { id: 'dashboard', label: 'Dashboard',    icon: LayoutDashboard, color: '#d0d0d0' },
+  { id: 'agents',    label: 'Agents',       icon: Crosshair,       color: '#b91c1c' },
+  { id: 'sessions',  label: 'Sessions',     icon: Monitor,         color: '#d0d0d0' },
+  { id: 'beacons',   label: 'Beacons',      icon: Radio,           color: '#d0d0d0' },
+  // ── OS-specific panels ─────────────────────────────────────────────────────
+  { id: 'windows',   label: 'Windows',      icon: Monitor,         color: '#b91c1c' },
+  { id: 'linux',     label: 'Linux',        icon: Shield,          color: '#d0d0d0' },
+  { id: 'macos',     label: 'macOS',        icon: Cpu,             color: '#d0d0d0' },
+  { id: 'android',   label: 'Android',      icon: Smartphone,      color: '#d0d0d0' },
+  // ── Infrastructure ─────────────────────────────────────────────────────────
+  { id: 'listeners', label: 'Listeners',    icon: Antenna,         color: '#d0d0d0' },
+  { id: 'loot',      label: 'Loot',         icon: Package,         color: '#d0d0d0' },
+  { id: 'netmap',    label: 'Network Map',  icon: MapIcon,         color: '#d0d0d0' },
+  { id: 'generate',  label: 'Generate',     icon: Cpu,             color: '#d0d0d0' },
+  { id: 'reports',   label: 'Reports',      icon: FileText,        color: '#6b6b6b' },
+  { id: 'ai',        label: 'AI Agent',     icon: Bot,             color: '#6b6b6b' },
 ]
 const NAV_BOTTOM: NavItem[] = [
   { id: 'settings',  label: 'Settings',     icon: Settings2,       color: '#7070a0' },
@@ -296,6 +305,9 @@ export default function App() {
             {activeTab === 'agents'    && <Agents     onOpenTerminal={openTerminal} />}
             {activeTab === 'sessions'  && <Sessions   onOpenTerminal={openTerminal} />}
             {activeTab === 'beacons'   && <Beacons    />}
+            {activeTab === 'windows'   && <Windows    onOpenTerminal={openTerminal} />}
+            {activeTab === 'linux'     && <Linux      onOpenTerminal={openTerminal} />}
+            {activeTab === 'macos'     && <MacOS      onOpenTerminal={openTerminal} />}
             {activeTab === 'android'   && <Android    onOpenTerminal={openTerminal} />}
             {activeTab === 'listeners' && <Listeners  />}
             {activeTab === 'loot'      && <Loot       />}
