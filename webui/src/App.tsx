@@ -47,20 +47,20 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard',    icon: LayoutDashboard, color: '#00ff88' },
-  { id: 'agents',    label: 'Agents',       icon: Crosshair,       color: '#ff4444' },
-  { id: 'sessions',  label: 'Sessions',     icon: Monitor,         color: '#00d4ff' },
-  { id: 'beacons',   label: 'Beacons',      icon: Radio,           color: '#ffaa00' },
-  { id: 'android',   label: 'Android',      icon: Smartphone,      color: '#00ff88' },
-  { id: 'listeners', label: 'Listeners',    icon: Antenna,         color: '#aa88ff' },
-  { id: 'loot',      label: 'Loot',         icon: Package,         color: '#aa88ff' },
-  { id: 'netmap',    label: 'Network Map',  icon: MapIcon,         color: '#00d4ff' },
-  { id: 'generate',  label: 'Generate',     icon: Cpu,             color: '#00d4ff' },
-  { id: 'reports',   label: 'Reports',      icon: FileText,        color: '#888899' },
-  { id: 'ai',        label: 'AI Agent',     icon: Bot,             color: '#aa88ff' },
+  { id: 'dashboard', label: 'Dashboard',    icon: LayoutDashboard, color: '#00e676' },
+  { id: 'agents',    label: 'Agents',       icon: Crosshair,       color: '#00e676' },
+  { id: 'sessions',  label: 'Sessions',     icon: Monitor,         color: '#29b6f6' },
+  { id: 'beacons',   label: 'Beacons',      icon: Radio,           color: '#ffa726' },
+  { id: 'android',   label: 'Android',      icon: Smartphone,      color: '#00e676' },
+  { id: 'listeners', label: 'Listeners',    icon: Antenna,         color: '#b39ddb' },
+  { id: 'loot',      label: 'Loot',         icon: Package,         color: '#b39ddb' },
+  { id: 'netmap',    label: 'Network Map',  icon: MapIcon,         color: '#29b6f6' },
+  { id: 'generate',  label: 'Generate',     icon: Cpu,             color: '#29b6f6' },
+  { id: 'reports',   label: 'Reports',      icon: FileText,        color: '#7070a0' },
+  { id: 'ai',        label: 'AI Agent',     icon: Bot,             color: '#b39ddb' },
 ]
 const NAV_BOTTOM: NavItem[] = [
-  { id: 'settings',  label: 'Settings',     icon: Settings2,       color: '#555577' },
+  { id: 'settings',  label: 'Settings',     icon: Settings2,       color: '#7070a0' },
 ]
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

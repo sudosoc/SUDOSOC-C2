@@ -263,18 +263,18 @@ export default function Android({ onOpenTerminal }: Props) {
       labelColor: 'text-danger',
       desc: 'Record microphone via Termux:API',
       action: () => exec(
-        "termux-microphone-record -l 15 -f /sdcard/Download/rec_$(date +%s).m4a 2>/dev/null && echo 'Recording 15s → /sdcard/Download/' || echo 'Install Termux:API app from F-Droid for microphone access'",
+        "command -v termux-microphone-record >/dev/null 2>&1 && { termux-microphone-record -l 15 -f /sdcard/Download/rec_$(date +%s).m4a; echo '[+] Recording 15s → /sdcard/Download/'; } || echo '[!] Setup: Open Termux → pkg install termux-api → then install Termux:API app from F-Droid and grant microphone permission'",
         'Audio Capture (15s)'
       ),
     },
     {
       icon: <Camera size={14} className="text-purple" />,
-      label: 'Camera',
+      label: 'Camera/Screen',
       color: 'border-purple/40 hover:bg-purple/10',
       labelColor: 'text-purple',
-      desc: 'Take photo via Termux:API or screencap',
+      desc: 'Take photo via Termux:API, fallback to screencap',
       action: () => exec(
-        "termux-camera-photo /sdcard/Download/photo_$(date +%s).jpg 2>/dev/null && echo 'Photo saved → /sdcard/Download/' || screencap -p /sdcard/Download/screen_$(date +%s).png 2>/dev/null && echo 'Screenshot saved → /sdcard/Download/' || echo 'Install Termux:API for camera, or run as root for screencap'",
+        "command -v termux-camera-photo >/dev/null 2>&1 && { termux-camera-photo /sdcard/Download/photo_$(date +%s).jpg && echo '[+] Photo → /sdcard/Download/'; } || { screencap -p /sdcard/Download/ss_$(date +%s).png 2>/dev/null && echo '[+] Screenshot → /sdcard/Download/'; } || echo '[!] Setup: pkg install termux-api + Termux:API app from F-Droid'",
         'Camera / Screenshot'
       ),
     },
@@ -285,19 +285,30 @@ export default function Android({ onOpenTerminal }: Props) {
       labelColor: 'text-warn',
       desc: 'Monitor input events (limited without root)',
       action: () => exec(
-        "getevent -l 2>/dev/null | grep KEY | head -30 || cat /dev/input/event* 2>/dev/null | head -20 || echo 'Root required for full keylogger. Termux input only: check ~/.bash_history'",
-        'Keylogger'
+        "getevent -l 2>/dev/null | grep KEY | head -50 || { echo '[!] Root required for hardware keylogger'; echo '[*] Bash history:'; cat ~/.bash_history 2>/dev/null | tail -30 || echo 'No history'; }",
+        'Keylogger / History'
       ),
     },
     {
       icon: <Phone size={14} className="text-primary" />,
-      label: 'Call Intercept',
+      label: 'Call Log',
       color: 'border-primary/40 hover:bg-primary/10',
       labelColor: 'text-primary',
-      desc: 'View call logs + listen via mic (needs Termux:API)',
+      desc: 'View call logs via content provider',
       action: () => exec(
-        "content query --uri content://call_log/calls --projection number:date:type:duration 2>/dev/null | head -80 || echo 'Needs READ_CALL_LOG permission'",
+        "content query --uri content://call_log/calls --projection number:date:type:duration 2>/dev/null | head -80 || echo '[!] Needs READ_CALL_LOG permission'",
         'Call Log'
+      ),
+    },
+    {
+      icon: <Globe size={14} className="text-accent" />,
+      label: 'GPS Location',
+      color: 'border-accent/40 hover:bg-accent/10',
+      labelColor: 'text-accent',
+      desc: 'Get device location via Termux:API or dumpsys',
+      action: () => exec(
+        "command -v termux-location >/dev/null 2>&1 && termux-location --provider gps 2>/dev/null || { echo '[Network location:]'; dumpsys location 2>/dev/null | grep -E 'mLastLocation|Last Known|Latitude|Longitude|lat=|lng=|network' | head -15; } || echo '[!] Setup: pkg install termux-api + Termux:API from F-Droid + grant Location permission'",
+        'GPS / Network Location'
       ),
     },
     {
@@ -552,7 +563,7 @@ export default function Android({ onOpenTerminal }: Props) {
                             ⬆ ..
                           </button>
                         )}
-                        {fsData.files.map(f => (
+                        {fsData.files.filter(f => f.name !== '.' && f.name !== '..').map(f => (
                           <div key={f.name}
                             className="flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/20">
                             <span className="text-[10px] shrink-0">{f.is_dir ? '📁' : '📄'}</span>
