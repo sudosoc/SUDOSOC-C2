@@ -73,6 +73,19 @@ func buildRouter() *mux.Router {
 	api.HandleFunc("/sessions/{id}/getsystem",  handleGetSystem).Methods(http.MethodPost)
 	api.HandleFunc("/sessions/{id}/pwd",        handlePWD).Methods(http.MethodGet)
 
+	// ── Power ops: tokens, registry, services, procdump ──────────────
+	api.HandleFunc("/sessions/{id}/token",              handleTokenOwner).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/impersonate",        handleImpersonate).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/maketoken",          handleMakeToken).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/revtoself",          handleRevToSelf).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/registry",           handleRegistryRead).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/registry",           handleRegistryWrite).Methods(http.MethodPost)
+	api.HandleFunc("/sessions/{id}/registry",           handleRegistryDelete).Methods(http.MethodDelete)
+	api.HandleFunc("/sessions/{id}/registry/keys",      handleRegistryListKeys).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/registry/values",    handleRegistryListValues).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/services",           handleServices).Methods(http.MethodGet)
+	api.HandleFunc("/sessions/{id}/procdump",           handleProcDump).Methods(http.MethodPost)
+
 	// ── Beacon control ────────────────────────────────────────────────
 	api.HandleFunc("/beacons/{id}/tasks",            handleBeaconTasks).Methods(http.MethodGet)
 	api.HandleFunc("/beacons/{id}/tasks/{taskID}",   handleBeaconTaskContent).Methods(http.MethodGet)
