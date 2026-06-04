@@ -691,13 +691,31 @@ func SliverExecutable(name string, build *clientpb.ImplantBuild, config *clientp
 	if !config.Debug && goConfig.GOOS == WINDOWS {
 		ldflags[0] += " -H=windowsgui"
 	}
+
+	// ── Android-specific hardening ──────────────────────────────────────
+	// PIE is required on Android 5.0+ (API 21+). Force it explicitly so
+	// the binary runs on every Android version up to and beyond API 36 (16).
+	// Also disable CGO entirely for Android — cross-compilation is pure Go.
+	buildMode := ""
+	if goConfig.GOOS == ANDROID {
+		buildMode = "pie"
+		goConfig.CGO = "0"
+		// Ensure the linker strips all symbol tables and DWARF debug info
+		// even when garble is not available (belt-and-suspenders).
+		ldflags = appendToLDFlags(ldflags, "-s -w")
+		// Embed no build IDs — makes binary-level correlation harder.
+		ldflags = appendToLDFlags(ldflags, "-buildid=")
+		buildLog.Infof("[android] building PIE binary with hardened ldflags")
+	}
+
 	gcFlags := ""
 	asmFlags := ""
 	if config.Debug {
 		gcFlags = "all=-N -l"
 		ldflags = []string{}
+		buildMode = ""
 	}
-	_, err = gogo.GoBuild(*goConfig, pkgPath, dest, "", tags, ldflags, gcFlags, asmFlags)
+	_, err = gogo.GoBuild(*goConfig, pkgPath, dest, buildMode, tags, ldflags, gcFlags, asmFlags)
 	if err != nil {
 		return "", err
 	}
