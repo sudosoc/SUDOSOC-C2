@@ -186,42 +186,40 @@ export default function App() {
 
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       <aside
-        className="flex flex-col bg-[#080812] border-r border-border shrink-0 transition-all duration-150 overflow-hidden"
-        style={{ width: sidebarW }}>
+        className="flex flex-col border-r border-border shrink-0 transition-all duration-150 overflow-hidden"
+        style={{ width: sidebarW, background: '#090909' }}>
 
-        {/* Logo + collapse toggle */}
-        <div className={`flex items-center py-4 border-b border-border/50 shrink-0 ${sidebarOpen ? 'px-4 gap-3' : 'justify-center'}`}>
-          <div className="w-8 h-8 rounded-md bg-primary/10 border border-primary/30 flex items-center justify-center shrink-0">
-            <Shield size={16} className="text-primary" />
+        {/* Logo */}
+        <div className={`flex items-center border-b border-border shrink-0 ${sidebarOpen ? 'px-3 py-3 gap-2.5' : 'justify-center py-3'}`}
+          style={{ background: 'rgba(185,28,28,.04)' }}>
+          <div className="w-7 h-7 rounded flex items-center justify-center shrink-0"
+            style={{ background: 'rgba(185,28,28,.15)', border: '1px solid rgba(185,28,28,.35)' }}>
+            <Shield size={13} className="text-primary" />
           </div>
-          {sidebarOpen && (
+          {sidebarOpen && <>
             <div className="flex-1 min-w-0">
-              <div className="text-primary font-bold text-xs tracking-wider truncate">SUDOSOC-C2</div>
-              <div className="text-muted text-[9px]">v2.0.0</div>
+              <div className="text-primary font-bold tracking-widest truncate" style={{ fontSize: 10, letterSpacing: '.15em' }}>SUDOSOC</div>
+              <div className="text-muted" style={{ fontSize: 8.5 }}>C2 Framework v2</div>
             </div>
-          )}
-          {sidebarOpen && (
             <button onClick={() => setSidebarOpen(false)} className="text-muted hover:text-text shrink-0">
-              <ChevronLeft size={14} />
+              <ChevronLeft size={13} />
             </button>
-          )}
+          </>}
         </div>
 
         {/* Nav items — grouped */}
-        <div className="flex-1 overflow-y-auto py-1 flex flex-col px-1.5">
+        <div className="flex-1 overflow-y-auto py-2 flex flex-col px-1.5">
           {NAV_GROUPS.map(group => (
-            <div key={group.label} className="mb-1">
-              {/* Section label (only when sidebar open) */}
+            <div key={group.label} className="mb-2">
               {sidebarOpen && (
-                <div className="px-2 py-1.5 text-[8px] font-bold tracking-[0.15em] text-muted/50 uppercase select-none">
+                <div className="px-2 mb-0.5" style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase', color: 'rgba(107,107,107,.5)', userSelect: 'none' }}>
                   {group.label}
                 </div>
               )}
-              {/* Divider when collapsed */}
               {!sidebarOpen && (
-                <div className="my-1 mx-2 border-t border-border/30" />
+                <div className="my-1.5 mx-1.5" style={{ height: 1, background: 'var(--border)', opacity: .5 }} />
               )}
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-px">
                 {group.items.map(item => {
                   const Icon     = item.icon
                   const active   = activeTab === item.id
@@ -230,19 +228,12 @@ export default function App() {
                     <button key={item.id}
                       onClick={() => { setActiveTab(item.id); if (!sidebarOpen) setSidebarOpen(true) }}
                       title={sidebarOpen ? undefined : item.label}
-                      className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs transition-all group ${
-                        active
-                          ? 'font-semibold'
-                          : 'text-muted hover:text-text hover:bg-white/5'
-                      } ${sidebarOpen ? '' : 'justify-center'}`}
-                      style={active ? { background: item.color + '18', color: item.color } : {}}>
-                      <Icon size={14} className="shrink-0" style={active ? { color: item.color } : {}} />
-                      {sidebarOpen && <span className="truncate">{item.label}</span>}
+                      className={`nav-item ${active ? 'active' : ''} ${sidebarOpen ? '' : 'justify-center'}`}
+                      style={active ? { color: item.color, background: item.color + '15', borderLeft: `2px solid ${item.color}` } : { borderLeft: '2px solid transparent' }}>
+                      <Icon size={13} className="shrink-0" style={{ color: active ? item.color : undefined }} />
+                      {sidebarOpen && <span className="truncate text-[11px]">{item.label}</span>}
                       {isAgents && totalAgents > 0 && sidebarOpen && (
-                        <span className="ml-auto shrink-0 rounded-full text-[9px] font-bold px-1.5 py-0.5"
-                          style={{ background: '#b91c1c33', color: '#ef4444' }}>
-                          {totalAgents}
-                        </span>
+                        <span className="ml-auto shrink-0 badge badge-live" style={{ fontSize: 8 }}>{totalAgents}</span>
                       )}
                     </button>
                   )
@@ -252,18 +243,18 @@ export default function App() {
           ))}
         </div>
 
-        {/* Collapse toggle (when closed) */}
+        {/* Collapse when closed */}
         {!sidebarOpen && (
-          <div className="px-1.5 pb-1">
+          <div className="px-1.5 pb-2">
             <button onClick={() => setSidebarOpen(true)}
-              className="w-full flex justify-center py-2 text-muted hover:text-primary transition-colors">
-              <ChevronLeft size={14} className="rotate-180" />
+              className="w-full flex justify-center py-2 text-muted hover:text-primary">
+              <ChevronLeft size={13} className="rotate-180" />
             </button>
           </div>
         )}
 
         {/* Bottom nav */}
-        <div className="border-t border-border/50 py-2 flex flex-col gap-0.5 px-1.5">
+        <div className="py-2 flex flex-col gap-px px-1.5" style={{ borderTop: '1px solid var(--border)' }}>
           {NAV_BOTTOM.map(item => {
             const Icon   = item.icon
             const active = activeTab === item.id
@@ -271,12 +262,10 @@ export default function App() {
               <button key={item.id}
                 onClick={() => setActiveTab(item.id)}
                 title={sidebarOpen ? undefined : item.label}
-                className={`flex items-center gap-2.5 px-2 py-2 rounded-md text-xs transition-all ${
-                  active ? 'font-semibold' : 'text-muted hover:text-text hover:bg-white/5'
-                } ${sidebarOpen ? '' : 'justify-center'}`}
-                style={active ? { background: item.color + '18', color: item.color } : {}}>
-                <Icon size={15} className="shrink-0" />
-                {sidebarOpen && <span className="truncate">{item.label}</span>}
+                className={`nav-item ${active ? 'active' : ''} ${sidebarOpen ? '' : 'justify-center'}`}
+                style={active ? { color: item.color, background: item.color + '15', borderLeft: `2px solid ${item.color}` } : { borderLeft: '2px solid transparent' }}>
+                <Icon size={13} className="shrink-0" />
+                {sidebarOpen && <span className="truncate text-[11px]">{item.label}</span>}
               </button>
             )
           })}
@@ -287,49 +276,48 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* ── Top header bar ──────────────────────────────────────────── */}
-        <header className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface shrink-0 h-11">
+        <header className="flex items-center justify-between px-4 border-b border-border shrink-0"
+          style={{ height: 40, background: '#090909' }}>
+          {/* Page title */}
           <div className="flex items-center gap-2">
             {activeItem && (
               <>
-                <activeItem.icon size={14} style={{ color: activeItem.color }} />
-                <span className="text-text text-sm font-semibold">{activeItem.label}</span>
+                <activeItem.icon size={13} style={{ color: activeItem.color }} />
+                <span className="font-semibold" style={{ fontSize: 12, color: activeItem.color === '#b91c1c' ? activeItem.color : 'var(--accent)' }}>
+                  {activeItem.label}
+                </span>
               </>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Event log toggle */}
-            <button onClick={openEventsPanel}
-              title="Event log"
-              className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] border transition-colors ${
-                showEvents
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-border text-muted hover:border-primary/30 hover:text-primary'
-              }`}>
-              {showEvents ? <BellOff size={11} /> : <Bell size={11} />}
-              <span className="hidden sm:inline">Events</span>
+          {/* Right controls */}
+          <div className="flex items-center gap-1.5">
+            {/* Events toggle */}
+            <button onClick={openEventsPanel} title="Event log"
+              className={`btn btn-ghost btn-sm relative ${showEvents ? 'btn-primary' : ''}`}>
+              {showEvents ? <BellOff size={10} /> : <Bell size={10} />}
+              <span className="hidden sm:inline" style={{ fontSize: 10 }}>Events</span>
               {unreadCount > 0 && !showEvents && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-danger text-[8px] text-white flex items-center justify-center font-bold">
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-danger text-white flex items-center justify-center font-bold"
+                  style={{ fontSize: 8 }}>
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
             </button>
 
-            {/* Terminal toggle */}
+            {/* Active terminal indicator */}
             {terminal && (
-              <button
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] border border-primary/40 bg-primary/10 text-primary"
-                title="Active terminal">
-                <TermIcon size={11} />
-                <span className="hidden sm:inline max-w-[80px] truncate">{terminal.sessionName}</span>
-              </button>
+              <span className="badge badge-live" style={{ fontSize: 9 }}>
+                <TermIcon size={9} /> {terminal.sessionName}
+              </span>
             )}
 
-            {/* WS status */}
-            <div className="flex items-center gap-1.5 text-[11px] border border-border rounded px-2.5 py-1">
-              {wsStatus === 'connected'  && <><Wifi    size={11} className="text-primary" /><span className="text-primary hidden sm:inline">connected</span></>}
-              {wsStatus === 'disconnected' && <><WifiOff size={11} className="text-danger"  /><span className="text-danger  hidden sm:inline">offline</span></>}
-              {wsStatus === 'connecting'   && <><Loader  size={11} className="text-warn animate-spin" /><span className="text-warn hidden sm:inline">…</span></>}
+            {/* WS connection */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded border"
+              style={{ fontSize: 10, borderColor: 'var(--border)' }}>
+              {wsStatus === 'connected'    && <><span className="dot dot-live" /><span className="text-primary hidden sm:inline">C2 Online</span></>}
+              {wsStatus === 'disconnected' && <><span className="dot dot-dead" /><span className="text-danger hidden sm:inline">Offline</span></>}
+              {wsStatus === 'connecting'   && <><Loader size={10} className="text-warn animate-spin" /><span className="text-warn hidden sm:inline">…</span></>}
             </div>
           </div>
         </header>
