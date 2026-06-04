@@ -85,8 +85,14 @@ var (
 		"linux/386":     true,
 		"linux/amd64":   true,
 		"linux/arm64":   true,
+		"linux/arm":     true,
 		"windows/386":   true,
 		"windows/amd64": true,
+		// Android (Go GOOS=android, not a Linux variant here)
+		"android/arm64": true,
+		"android/arm":   true,
+		"android/amd64": true,
+		"android/386":   true,
 	}
 
 	ErrNoExternalBuilder = errors.New("no external builders are available")
