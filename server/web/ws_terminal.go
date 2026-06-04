@@ -147,28 +147,12 @@ func executeOnSession(_ context.Context, session *core.Session, cmd string) (str
 
 	var req *sudosocpb.ExecuteReq
 
-	// Android implants run in a restricted process without PATH configured.
-	// Wrap every command in /system/bin/sh -c so binaries are found via the
-	// shell (same fix as the REST API execute handler).
-	if strings.Contains(strings.ToLower(session.OS), "android") {
-		req = &sudosocpb.ExecuteReq{
-			Path:   "/system/bin/sh",
-			Args:   []string{"-c", cmd},
-			Output: true,
-			Request: &commonpb.Request{SessionID: session.ID},
-		}
-	} else {
-		args := strings.Fields(cmd)
-		if len(args) == 0 {
-			return "", nil
-		}
-		req = &sudosocpb.ExecuteReq{
-			Path:   args[0],
-			Args:   args[1:],
-			Output: true,
-			Request: &commonpb.Request{SessionID: session.ID},
-		}
-	}
+	// Wrap every command in the platform shell so PATH resolution, pipes,
+	// redirects, and quoted arguments all work correctly:
+	//   Windows → cmd.exe /c <cmd>
+	//   Android → /system/bin/sh -c <cmd>   (restricted PATH)
+	//   Linux/macOS → /bin/sh -c <cmd>
+	req = shellWrapExecReq(session.OS, cmd, session.ID)
 
 	resp := &sudosocpb.Execute{Response: &commonpb.Response{}}
 	if err := webRPC.GenericHandler(req, resp); err != nil {
@@ -204,6 +188,36 @@ func sendTerm(conn *websocket.Conn, msgType, data string) {
 func sendPrompt(conn *websocket.Conn, name, host string) {
 	p := fmt.Sprintf("\033[1;36m[phantom:%s]\033[0m@\033[1;35m[%s]\033[0m \033[1;37m>\033[0m ", name, host)
 	sendTerm(conn, "prompt", p)
+}
+
+// shellWrapExecReq builds a platform-appropriate ExecuteReq that wraps the
+// command in the OS shell. This ensures PATH resolution, pipes, redirects,
+// and quoted arguments all work correctly from the Web UI.
+//
+//	Windows → cmd.exe /c <cmd>
+//	Android → /system/bin/sh -c <cmd>  (no PATH in implant process)
+//	Linux/macOS → /bin/sh -c <cmd>
+func shellWrapExecReq(osName, cmd, sessionID string) *sudosocpb.ExecuteReq {
+	o := strings.ToLower(osName)
+	var path string
+	var args []string
+	switch {
+	case strings.Contains(o, "windows"):
+		path = "cmd.exe"
+		args = []string{"/c", cmd}
+	case strings.Contains(o, "android"):
+		path = "/system/bin/sh"
+		args = []string{"-c", cmd}
+	default: // linux, darwin, freebsd, …
+		path = "/bin/sh"
+		args = []string{"-c", cmd}
+	}
+	return &sudosocpb.ExecuteReq{
+		Path:   path,
+		Args:   args,
+		Output: true,
+		Request: &commonpb.Request{SessionID: sessionID},
+	}
 }
 
 // termHelpText returns the help banner shown on `help` / `?`.

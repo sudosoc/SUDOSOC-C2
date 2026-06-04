@@ -55,6 +55,21 @@ function fmtBytes(b: number) {
   return `${b}B`
 }
 
+// joinPath: construct child path using the correct separator for the OS.
+function joinPath(base: string, name: string, isWin: boolean): string {
+  const sep  = isWin ? '\\' : '/'
+  const clean = base.replace(/[/\\]+$/, '')  // strip trailing sep
+  return clean + sep + name
+}
+
+// parentPath: navigate up one directory level, handling both separators.
+function parentPath(p: string): string {
+  const clean = p.replace(/[/\\]+$/, '')
+  const idx   = Math.max(clean.lastIndexOf('/'), clean.lastIndexOf('\\'))
+  if (idx <= 0) return p.startsWith('\\\\') ? '\\\\' : (isNaN(parseInt(clean[0])) ? '/' : clean.slice(0, 3))
+  return clean.slice(0, idx) || '/'
+}
+
 // ─── Quick commands by OS ─────────────────────────────────────────────────────
 
 const QUICK_WIN = [
@@ -456,12 +471,17 @@ export default function Agents({ onOpenTerminal }: Props) {
                         {/* File list */}
                         {fsData[a.id] && (
                           <div className="border border-border rounded-lg overflow-hidden max-h-52 overflow-y-auto">
+                            {/* Go up */}
+                            <button onClick={() => browseFs(a.id, parentPath(fsData[a.id].path))}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/40 text-[11px] text-muted">
+                              ⬆ ..
+                            </button>
                             {fsData[a.id].files.map(f => (
                               <div key={f.name}
                                 className="flex items-center gap-2 px-3 py-1.5 hover:bg-border/20 border-b border-border/20 group text-[11px]">
                                 <span>{f.is_dir ? '📁' : '📄'}</span>
                                 <button
-                                  onClick={() => f.is_dir && browseFs(a.id, fsData[a.id].path + '/' + f.name)}
+                                  onClick={() => f.is_dir && browseFs(a.id, joinPath(fsData[a.id].path, f.name, isWin))}
                                   className={`flex-1 font-mono text-left truncate ${f.is_dir ? 'text-warn hover:text-primary cursor-pointer' : 'text-text'}`}>
                                   {f.name}
                                 </button>
@@ -470,7 +490,7 @@ export default function Agents({ onOpenTerminal }: Props) {
                                 </span>
                                 {!f.is_dir && (
                                   <button
-                                    onClick={() => downloadFile(a.id, fsData[a.id].path + '/' + f.name)}
+                                    onClick={() => downloadFile(a.id, joinPath(fsData[a.id].path, f.name, isWin))}
                                     title={`Download ${f.name}`}
                                     className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border border-primary/30 text-primary hover:bg-primary/10 transition-colors shrink-0">
                                     <Download size={9} /> DL
