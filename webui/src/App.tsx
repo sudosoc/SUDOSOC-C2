@@ -1,3 +1,15 @@
+/**
+ * SUDOSOC-C2 — Operator Console
+ * Layout inspired by Havoc C2 / Mythic C2 / Cobalt Strike
+ *
+ * Structure:
+ *   [Narrow Icon Sidebar 48px | Expanded 180px]
+ *   [Top status bar 34px]
+ *   [Content area — full remaining space]
+ *   [Terminal slide-up panel]
+ *   [Status bar 22px bottom]
+ */
+
 import { useState, useCallback, useRef, useEffect } from 'react'
 import Dashboard  from './components/Dashboard'
 import Agents     from './components/Agents'
@@ -15,42 +27,28 @@ import Settings   from './components/Settings'
 import NetworkMap from './components/NetworkMap'
 import Reports    from './components/Reports'
 import Terminal   from './components/Terminal'
-import { useEventStream } from './hooks/useWebSocket'
-import type { WSEvent } from './types'
+import { useEventStream }  from './hooks/useWebSocket'
+import { useAPI }          from './hooks/useAPI'
+import type { WSEvent, Stats } from './types'
 import {
   LayoutDashboard, Monitor, Radio, Antenna, Package,
   Smartphone, Cpu, Bot, Settings2, Map as MapIcon, FileText,
   Terminal as TermIcon, Wifi, WifiOff, Loader, Shield,
-  Users, ChevronLeft, Bell, BellOff, Activity,
-  Crosshair, X, Clock, AlertCircle,
+  ChevronLeft, ChevronRight, Activity, Crosshair, X,
+  Bell, BellOff, Zap, Clock, Users, LogOut,
 } from 'lucide-react'
 
-// ─── Event log entry ──────────────────────────────────────────────────────────
-interface EventEntry {
-  id:      number
-  ts:      number
-  type:    string
-  msg:     string
-  icon:    string
-  urgent:  boolean
-}
+// ═══════════════════════════════════════════════════════════════
+// NAV CONFIG
+// ═══════════════════════════════════════════════════════════════
 
-// ─── Tab config ───────────────────────────────────────────────────────────────
 type TabID =
   | 'dashboard' | 'agents'   | 'sessions'  | 'beacons'
   | 'windows'   | 'linux'    | 'macos'     | 'android'
   | 'listeners' | 'loot'     | 'netmap'    | 'generate'
   | 'reports'   | 'ai'       | 'settings'
 
-interface NavItem {
-  id:    TabID
-  label: string
-  icon:  React.ElementType
-  color: string
-  badge?: string
-}
-
-// ─── Nav groups — gives the sidebar visual structure ─────────────────────────
+interface NavItem { id: TabID; label: string; icon: React.ElementType; color: string }
 interface NavGroup { label: string; items: NavItem[] }
 
 const NAV_GROUPS: NavGroup[] = [
@@ -71,7 +69,7 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: 'C2',
+    label: 'C2 Infrastructure',
     items: [
       { id: 'sessions',  label: 'Sessions',    icon: Monitor,         color: '#d0d0d0' },
       { id: 'beacons',   label: 'Beacons',     icon: Radio,           color: '#d0d0d0' },
@@ -81,272 +79,386 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Toolkit',
     items: [
-      { id: 'generate',  label: 'Generate',    icon: Cpu,             color: '#d0d0d0' },
+      { id: 'generate',  label: 'Generate',    icon: Zap,             color: '#b91c1c' },
       { id: 'loot',      label: 'Loot',        icon: Package,         color: '#d0d0d0' },
-      { id: 'netmap',    label: 'Network Map', icon: MapIcon,         color: '#d0d0d0' },
+      { id: 'netmap',    label: 'Net Map',     icon: MapIcon,         color: '#d0d0d0' },
       { id: 'reports',   label: 'Reports',     icon: FileText,        color: '#6b6b6b' },
-      { id: 'ai',        label: 'AI Agent',    icon: Bot,             color: '#b91c1c' },
+      { id: 'ai',        label: 'AI Copilot',  icon: Bot,             color: '#b91c1c' },
     ],
   },
 ]
 
-// Flat NAV for existing lookup code
-const NAV: NavItem[] = NAV_GROUPS.flatMap(g => g.items)
-
 const NAV_BOTTOM: NavItem[] = [
-  { id: 'settings',  label: 'Settings',     icon: Settings2,       color: '#6b6b6b' },
+  { id: 'settings', label: 'Settings', icon: Settings2, color: '#6b6b6b' },
 ]
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-let _evId = 0
-function parseEvent(e: WSEvent): EventEntry {
-  const payload = e.payload as Record<string, string>
-  const name    = payload.session_name ?? payload.beacon_name ?? payload.operator ?? ''
-  const typeMap: Record<string, [string, boolean]> = {
-    'session-connected':    ['💀', true  ],
-    'session-disconnected': ['🔴', true  ],
-    'beacon-registered':    ['📡', true  ],
-    'operator-joined':      ['👤', false ],
-    'operator-left':        ['👤', false ],
-    'job-started':          ['▶️', false ],
-    'job-stopped':          ['⏹️', false ],
+const NAV_FLAT: NavItem[] = [...NAV_GROUPS.flatMap(g => g.items), ...NAV_BOTTOM]
+
+// ═══════════════════════════════════════════════════════════════
+// EVENT PARSING
+// ═══════════════════════════════════════════════════════════════
+
+let _eid = 0
+interface Ev { id: number; ts: number; type: string; msg: string; icon: string; urgent: boolean }
+
+function parseEv(e: WSEvent): Ev {
+  const p = e.payload as Record<string, string>
+  const name = p.session_name ?? p.beacon_name ?? p.operator ?? ''
+  const map: Record<string, [string, boolean]> = {
+    'session-connected':    ['💀', true ],
+    'session-disconnected': ['🔴', true ],
+    'beacon-registered':    ['📡', true ],
+    'operator-joined':      ['👤', false],
+    'operator-left':        ['👤', false],
+    'job-started':          ['▶',  false],
+    'job-stopped':          ['⏹',  false],
   }
-  const [icon, urgent] = typeMap[e.type] ?? ['•', false]
-  const ts = e.time ? e.time * 1000 : Date.now()
-  return {
-    id:     ++_evId,
-    ts,
-    type:   e.type,
-    msg:    name ? `${e.type}  ${name}` : e.type,
-    icon,
-    urgent,
-  }
+  const [icon, urgent] = map[e.type] ?? ['·', false]
+  return { id: ++_eid, ts: e.time ? e.time * 1000 : Date.now(), type: e.type,
+    msg: name ? `${e.type} — ${name}` : e.type, icon, urgent }
 }
 
-function tsAgo(ts: number) {
+function ago(ts: number) {
   const s = Math.floor((Date.now() - ts) / 1000)
-  if (s < 60)   return `${s}s ago`
-  if (s < 3600) return `${Math.floor(s/60)}m ago`
-  return `${Math.floor(s/3600)}h ago`
+  if (s < 60)   return `${s}s`
+  if (s < 3600) return `${Math.floor(s/60)}m`
+  return `${Math.floor(s/3600)}h`
 }
 
-// ─── App ─────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// APP
+// ═══════════════════════════════════════════════════════════════
 
 interface ActiveTerminal { sessionID: string; sessionName: string }
 
 export default function App() {
-  const [activeTab,    setActiveTab]   = useState<TabID>('dashboard')
-  const [terminal,     setTerminal]    = useState<ActiveTerminal | null>(null)
-  const [sidebarOpen,  setSidebarOpen] = useState(true)
-  const [showEvents,   setShowEvents]  = useState(false)
-  const [events,       setEvents]      = useState<EventEntry[]>([])
-  const [unreadCount,  setUnreadCount] = useState(0)
-  const [agentCount,   setAgentCount]  = useState({ sessions: 0, beacons: 0 })
-  const evLogRef = useRef<HTMLDivElement>(null)
+  const [tab,       setTab]       = useState<TabID>('dashboard')
+  const [terminal,  setTerminal]  = useState<ActiveTerminal | null>(null)
+  const [sideOpen,  setSideOpen]  = useState(true)
+  const [evOpen,    setEvOpen]    = useState(false)
+  const [events,    setEvents]    = useState<Ev[]>([])
+  const [unread,    setUnread]    = useState(0)
+  const [agentCnt,  setAgentCnt]  = useState({ s: 0, b: 0 })
+  const evRef = useRef<HTMLDivElement>(null)
 
-  // ── WebSocket event handler ─────────────────────────────────────────────
-  const onWsEvent = useCallback((e: WSEvent) => {
+  const { data: stats } = useAPI<Stats>('/api/stats', 8_000)
+
+  const onWs = useCallback((e: WSEvent) => {
     if (e.type === 'heartbeat') return
-    const entry = parseEvent(e)
-    setEvents(prev => [entry, ...prev].slice(0, 200))
-    if (!showEvents) setUnreadCount(c => c + 1)
+    const ev = parseEv(e)
+    setEvents(p => [ev, ...p].slice(0, 200))
+    if (!evOpen) setUnread(c => c + 1)
+    if (e.type === 'session-connected')    setAgentCnt(c => ({ ...c, s: c.s + 1 }))
+    if (e.type === 'session-disconnected') setAgentCnt(c => ({ ...c, s: Math.max(0, c.s - 1) }))
+    if (e.type === 'beacon-registered')    setAgentCnt(c => ({ ...c, b: c.b + 1 }))
+  }, [evOpen])
 
-    // Update agent badge counts on connect/disconnect
-    if (e.type === 'session-connected')    setAgentCount(c => ({ ...c, sessions: c.sessions + 1 }))
-    if (e.type === 'session-disconnected') setAgentCount(c => ({ ...c, sessions: Math.max(0, c.sessions - 1) }))
-    if (e.type === 'beacon-registered')    setAgentCount(c => ({ ...c, beacons: c.beacons + 1 }))
-  }, [showEvents])
+  const wsStatus = useEventStream(onWs)
 
-  const wsStatus = useEventStream(onWsEvent)
-
-  // Auto-scroll event log to top when new events arrive
   useEffect(() => {
-    if (showEvents && evLogRef.current) {
-      evLogRef.current.scrollTop = 0
-    }
-  }, [events.length, showEvents])
+    if (evOpen && evRef.current) evRef.current.scrollTop = 0
+  }, [events.length, evOpen])
 
-  function openTerminal(sessionID: string, sessionName = '') {
+  function openTerm(sessionID: string, sessionName = '') {
     setTerminal({ sessionID, sessionName: sessionName || sessionID.slice(0, 8) })
   }
 
-  function openEventsPanel() {
-    setShowEvents(v => !v)
-    setUnreadCount(0)
-  }
-
-  const totalAgents = agentCount.sessions + agentCount.beacons
-
-  const activeItem = [...NAV, ...NAV_BOTTOM].find(n => n.id === activeTab)
-
-  const sidebarW = sidebarOpen ? 200 : 56
+  const totalAgents = agentCnt.s + agentCnt.b
+  const activeItem = NAV_FLAT.find(n => n.id === tab)
+  const sideW = sideOpen ? 180 : 48
 
   return (
-    <div className="flex h-screen bg-bg text-text font-mono overflow-hidden">
+    <div className="flex h-screen overflow-hidden" style={{ background: '#0a0a0a', color: '#f0f0f0', fontFamily: 'JetBrains Mono, Fira Code, monospace' }}>
 
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-      <aside
-        className="flex flex-col border-r border-border shrink-0 transition-all duration-150 overflow-hidden"
-        style={{ width: sidebarW, background: '#090909' }}>
+      {/* ══════════════════════════════════════════════════════
+          SIDEBAR
+          ══════════════════════════════════════════════════════ */}
+      <nav
+        style={{
+          width: sideW,
+          background: '#080808',
+          borderRight: '1px solid #1e1e1e',
+          display: 'flex',
+          flexDirection: 'column',
+          flexShrink: 0,
+          transition: 'width 0.15s ease',
+          overflow: 'hidden',
+        }}>
 
         {/* Logo */}
-        <div className={`flex items-center border-b border-border shrink-0 ${sidebarOpen ? 'px-3 py-3 gap-2.5' : 'justify-center py-3'}`}
-          style={{ background: 'rgba(185,28,28,.04)' }}>
-          <div className="w-7 h-7 rounded flex items-center justify-center shrink-0"
-            style={{ background: 'rgba(185,28,28,.15)', border: '1px solid rgba(185,28,28,.35)' }}>
-            <Shield size={13} className="text-primary" />
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: sideOpen ? '14px 12px 12px' : '14px 0 12px',
+          justifyContent: sideOpen ? 'flex-start' : 'center',
+          borderBottom: '1px solid #1a1a1a',
+          flexShrink: 0,
+        }}>
+          <div style={{
+            width: 26, height: 26, borderRadius: 5, flexShrink: 0,
+            background: 'rgba(185,28,28,.18)',
+            border: '1px solid rgba(185,28,28,.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Shield size={13} style={{ color: '#b91c1c' }} />
           </div>
-          {sidebarOpen && <>
-            <div className="flex-1 min-w-0">
-              <div className="text-primary font-bold tracking-widest truncate" style={{ fontSize: 10, letterSpacing: '.15em' }}>SUDOSOC</div>
-              <div className="text-muted" style={{ fontSize: 8.5 }}>C2 Framework v2</div>
+          {sideOpen && (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.16em', color: '#b91c1c', textTransform: 'uppercase' }}>
+                SUDOSOC
+              </div>
+              <div style={{ fontSize: 8, color: '#444', letterSpacing: '.06em' }}>C2 FRAMEWORK</div>
             </div>
-            <button onClick={() => setSidebarOpen(false)} className="text-muted hover:text-text shrink-0">
-              <ChevronLeft size={13} />
+          )}
+          {sideOpen && (
+            <button onClick={() => setSideOpen(false)}
+              style={{ color: '#333', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0, padding: 2 }}>
+              <ChevronLeft size={12} />
             </button>
-          </>}
+          )}
         </div>
 
-        {/* Nav items — grouped */}
-        <div className="flex-1 overflow-y-auto py-2 flex flex-col px-1.5">
-          {NAV_GROUPS.map(group => (
-            <div key={group.label} className="mb-2">
-              {sidebarOpen && (
-                <div className="px-2 mb-0.5" style={{ fontSize: 8, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase', color: 'rgba(107,107,107,.5)', userSelect: 'none' }}>
+        {/* Nav groups */}
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '6px 4px' }}>
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={group.label} style={{ marginBottom: 4 }}>
+              {/* Group label */}
+              {sideOpen ? (
+                <div style={{
+                  fontSize: 7.5, fontWeight: 700, letterSpacing: '.14em',
+                  textTransform: 'uppercase', color: '#2a2a2a',
+                  padding: '6px 6px 3px', userSelect: 'none',
+                }}>
                   {group.label}
                 </div>
+              ) : (
+                gi > 0 && <div style={{ height: 1, background: '#1a1a1a', margin: '6px 4px' }} />
               )}
-              {!sidebarOpen && (
-                <div className="my-1.5 mx-1.5" style={{ height: 1, background: 'var(--border)', opacity: .5 }} />
-              )}
-              <div className="flex flex-col gap-px">
-                {group.items.map(item => {
-                  const Icon     = item.icon
-                  const active   = activeTab === item.id
-                  const isAgents = item.id === 'agents'
-                  return (
-                    <button key={item.id}
-                      onClick={() => { setActiveTab(item.id); if (!sidebarOpen) setSidebarOpen(true) }}
-                      title={sidebarOpen ? undefined : item.label}
-                      className={`nav-item ${active ? 'active' : ''} ${sidebarOpen ? '' : 'justify-center'}`}
-                      style={active ? { color: item.color, background: item.color + '15', borderLeft: `2px solid ${item.color}` } : { borderLeft: '2px solid transparent' }}>
-                      <Icon size={13} className="shrink-0" style={{ color: active ? item.color : undefined }} />
-                      {sidebarOpen && <span className="truncate text-[11px]">{item.label}</span>}
-                      {isAgents && totalAgents > 0 && sidebarOpen && (
-                        <span className="ml-auto shrink-0 badge badge-live" style={{ fontSize: 8 }}>{totalAgents}</span>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
+
+              {/* Nav items */}
+              {group.items.map(item => {
+                const Icon   = item.icon
+                const active = tab === item.id
+                const isAgents = item.id === 'agents'
+                return (
+                  <button key={item.id}
+                    onClick={() => { setTab(item.id); if (!sideOpen) setSideOpen(true) }}
+                    title={sideOpen ? undefined : item.label}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 9,
+                      width: '100%',
+                      padding: sideOpen ? '5px 8px' : '7px 0',
+                      justifyContent: sideOpen ? 'flex-start' : 'center',
+                      borderRadius: 4,
+                      border: active ? `1px solid ${item.color}22` : '1px solid transparent',
+                      background: active ? `${item.color}12` : 'transparent',
+                      borderLeft: active ? `2px solid ${item.color}` : '2px solid transparent',
+                      color: active ? item.color : '#3a3a3a',
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      fontFamily: 'inherit',
+                      fontWeight: active ? 700 : 400,
+                      transition: 'all .1s',
+                      marginBottom: 1,
+                      textAlign: 'left',
+                    }}
+                    onMouseEnter={e => {
+                      if (!active) (e.currentTarget as HTMLButtonElement).style.color = '#888'
+                    }}
+                    onMouseLeave={e => {
+                      if (!active) (e.currentTarget as HTMLButtonElement).style.color = '#3a3a3a'
+                    }}>
+                    <Icon size={13} style={{ flexShrink: 0, color: active ? item.color : 'currentColor' }} />
+                    {sideOpen && (
+                      <>
+                        <span style={{ flex: 1, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                          {item.label}
+                        </span>
+                        {isAgents && totalAgents > 0 && (
+                          <span style={{
+                            fontSize: 8, fontWeight: 800, padding: '1px 5px',
+                            borderRadius: 3, background: 'rgba(185,28,28,.2)',
+                            color: '#ef4444', border: '1px solid rgba(185,28,28,.35)',
+                          }}>
+                            {totalAgents}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                )
+              })}
             </div>
           ))}
         </div>
 
-        {/* Collapse when closed */}
-        {!sidebarOpen && (
-          <div className="px-1.5 pb-2">
-            <button onClick={() => setSidebarOpen(true)}
-              className="w-full flex justify-center py-2 text-muted hover:text-primary">
-              <ChevronLeft size={13} className="rotate-180" />
+        {/* Collapse toggle when closed */}
+        {!sideOpen && (
+          <div style={{ padding: '4px 0 8px', display: 'flex', justifyContent: 'center' }}>
+            <button onClick={() => setSideOpen(true)}
+              style={{ color: '#333', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+              <ChevronRight size={12} />
             </button>
           </div>
         )}
 
-        {/* Bottom nav */}
-        <div className="py-2 flex flex-col gap-px px-1.5" style={{ borderTop: '1px solid var(--border)' }}>
+        {/* Bottom: settings */}
+        <div style={{ borderTop: '1px solid #1a1a1a', padding: '6px 4px' }}>
           {NAV_BOTTOM.map(item => {
-            const Icon   = item.icon
-            const active = activeTab === item.id
+            const Icon = item.icon
+            const active = tab === item.id
             return (
               <button key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                title={sidebarOpen ? undefined : item.label}
-                className={`nav-item ${active ? 'active' : ''} ${sidebarOpen ? '' : 'justify-center'}`}
-                style={active ? { color: item.color, background: item.color + '15', borderLeft: `2px solid ${item.color}` } : { borderLeft: '2px solid transparent' }}>
-                <Icon size={13} className="shrink-0" />
-                {sidebarOpen && <span className="truncate text-[11px]">{item.label}</span>}
+                onClick={() => setTab(item.id)}
+                title={sideOpen ? undefined : item.label}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 9, width: '100%',
+                  padding: sideOpen ? '5px 8px' : '7px 0',
+                  justifyContent: sideOpen ? 'flex-start' : 'center',
+                  borderRadius: 4, border: '1px solid transparent',
+                  background: active ? 'rgba(255,255,255,.04)' : 'transparent',
+                  color: active ? '#d0d0d0' : '#333',
+                  cursor: 'pointer', fontSize: 11, fontFamily: 'inherit',
+                }}>
+                <Icon size={13} style={{ flexShrink: 0 }} />
+                {sideOpen && <span style={{ overflow: 'hidden', whiteSpace: 'nowrap' }}>{item.label}</span>}
               </button>
             )
           })}
         </div>
-      </aside>
+      </nav>
 
-      {/* ── Main area ────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* ══════════════════════════════════════════════════════
+          MAIN AREA
+          ══════════════════════════════════════════════════════ */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
 
-        {/* ── Top header bar ──────────────────────────────────────────── */}
-        <header className="flex items-center justify-between px-4 border-b border-border shrink-0"
-          style={{ height: 40, background: '#090909' }}>
-          {/* Page title */}
-          <div className="flex items-center gap-2">
+        {/* ── Top status bar ── */}
+        <header style={{
+          height: 34,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 14px',
+          borderBottom: '1px solid #1a1a1a',
+          background: '#080808',
+          flexShrink: 0,
+        }}>
+          {/* Left: breadcrumb */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {activeItem && (
               <>
-                <activeItem.icon size={13} style={{ color: activeItem.color }} />
-                <span className="font-semibold" style={{ fontSize: 12, color: activeItem.color === '#b91c1c' ? activeItem.color : 'var(--accent)' }}>
+                <activeItem.icon size={12} style={{ color: activeItem.color }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: activeItem.color === '#b91c1c' ? '#ef4444' : '#d0d0d0',
+                  letterSpacing: '.04em' }}>
                   {activeItem.label}
                 </span>
               </>
             )}
           </div>
 
-          {/* Right controls */}
-          <div className="flex items-center gap-1.5">
+          {/* Right: controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+
+            {/* Stat chips */}
+            {stats && [
+              { v: stats.sessions, l: 'sess', c: '#d0d0d0' },
+              { v: stats.beacons,  l: 'bcns', c: '#888' },
+              { v: stats.listeners,l: 'lstn', c: '#555' },
+            ].map(({ v, l, c }) => v > 0 && (
+              <span key={l} style={{
+                fontSize: 9, padding: '2px 6px', borderRadius: 3,
+                background: 'rgba(255,255,255,.04)', border: '1px solid #1e1e1e',
+                color: c, fontVariantNumeric: 'tabular-nums',
+              }}>
+                {v} {l}
+              </span>
+            ))}
+
             {/* Events toggle */}
-            <button onClick={openEventsPanel} title="Event log"
-              className={`btn btn-ghost btn-sm relative ${showEvents ? 'btn-primary' : ''}`}>
-              {showEvents ? <BellOff size={10} /> : <Bell size={10} />}
-              <span className="hidden sm:inline" style={{ fontSize: 10 }}>Events</span>
-              {unreadCount > 0 && !showEvents && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-danger text-white flex items-center justify-center font-bold"
-                  style={{ fontSize: 8 }}>
-                  {unreadCount > 9 ? '9+' : unreadCount}
+            <button
+              onClick={() => { setEvOpen(v => !v); setUnread(0) }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '3px 8px', borderRadius: 3, fontSize: 9, cursor: 'pointer',
+                background: evOpen ? 'rgba(185,28,28,.12)' : 'rgba(255,255,255,.03)',
+                border: `1px solid ${evOpen ? 'rgba(185,28,28,.3)' : '#222'}`,
+                color: evOpen ? '#ef4444' : '#555',
+                fontFamily: 'inherit', position: 'relative',
+              }}>
+              {evOpen ? <BellOff size={10} /> : <Bell size={10} />}
+              <span>Events</span>
+              {unread > 0 && !evOpen && (
+                <span style={{
+                  position: 'absolute', top: -4, right: -4,
+                  width: 14, height: 14, borderRadius: '50%',
+                  background: '#b91c1c', fontSize: 8, fontWeight: 800,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#fff',
+                }}>
+                  {unread > 9 ? '9+' : unread}
                 </span>
               )}
             </button>
 
-            {/* Active terminal indicator */}
+            {/* Terminal indicator */}
             {terminal && (
-              <span className="badge badge-live" style={{ fontSize: 9 }}>
-                <TermIcon size={9} /> {terminal.sessionName}
+              <span style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '3px 8px', borderRadius: 3, fontSize: 9,
+                background: 'rgba(185,28,28,.1)', border: '1px solid rgba(185,28,28,.3)',
+                color: '#ef4444',
+              }}>
+                <TermIcon size={9} />
+                {terminal.sessionName}
               </span>
             )}
 
-            {/* WS connection */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded border"
-              style={{ fontSize: 10, borderColor: 'var(--border)' }}>
-              {wsStatus === 'connected'    && <><span className="dot dot-live" /><span className="text-primary hidden sm:inline">C2 Online</span></>}
-              {wsStatus === 'disconnected' && <><span className="dot dot-dead" /><span className="text-danger hidden sm:inline">Offline</span></>}
-              {wsStatus === 'connecting'   && <><Loader size={10} className="text-warn animate-spin" /><span className="text-warn hidden sm:inline">…</span></>}
+            {/* WS status */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '3px 8px', borderRadius: 3, fontSize: 9,
+              border: '1px solid #1e1e1e',
+              color: wsStatus === 'connected' ? '#b91c1c' : wsStatus === 'disconnected' ? '#555' : '#b45309',
+            }}>
+              {wsStatus === 'connected'    && <><span style={{ width: 5, height: 5, borderRadius: '50%', background: '#b91c1c', flexShrink: 0, animation: 'pulse 2s infinite' }} /><span>ONLINE</span></>}
+              {wsStatus === 'disconnected' && <><WifiOff size={9} /><span>OFFLINE</span></>}
+              {wsStatus === 'connecting'   && <><Loader size={9} style={{ animation: 'spin 1s linear infinite' }} /><span>...</span></>}
             </div>
           </div>
         </header>
 
-        {/* ── Content stack ──────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-h-0">
+        {/* ── Content + optional panels ── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
 
-          {/* Main tab content */}
-          <div className="flex-1 min-h-0 overflow-auto p-4">
-            {activeTab === 'dashboard' && <Dashboard  onOpenTerminal={openTerminal} />}
-            {activeTab === 'agents'    && <Agents     onOpenTerminal={openTerminal} />}
-            {activeTab === 'sessions'  && <Sessions   onOpenTerminal={openTerminal} />}
-            {activeTab === 'beacons'   && <Beacons    />}
-            {activeTab === 'windows'   && <Windows    onOpenTerminal={openTerminal} />}
-            {activeTab === 'linux'     && <Linux      onOpenTerminal={openTerminal} />}
-            {activeTab === 'macos'     && <MacOS      onOpenTerminal={openTerminal} />}
-            {activeTab === 'android'   && <Android    onOpenTerminal={openTerminal} />}
-            {activeTab === 'listeners' && <Listeners  />}
-            {activeTab === 'loot'      && <Loot       />}
-            {activeTab === 'netmap'    && <NetworkMap  onOpenTerminal={openTerminal} />}
-            {activeTab === 'generate'  && <Generate   />}
-            {activeTab === 'reports'   && <Reports    />}
-            {activeTab === 'ai'        && <AI         />}
-            {activeTab === 'settings'  && <Settings   />}
+          {/* Main content */}
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '12px 14px' }}>
+            {tab === 'dashboard' && <Dashboard  onOpenTerminal={openTerm} />}
+            {tab === 'agents'    && <Agents     onOpenTerminal={openTerm} />}
+            {tab === 'sessions'  && <Sessions   onOpenTerminal={openTerm} />}
+            {tab === 'beacons'   && <Beacons    />}
+            {tab === 'windows'   && <Windows    onOpenTerminal={openTerm} />}
+            {tab === 'linux'     && <Linux      onOpenTerminal={openTerm} />}
+            {tab === 'macos'     && <MacOS      onOpenTerminal={openTerm} />}
+            {tab === 'android'   && <Android    onOpenTerminal={openTerm} />}
+            {tab === 'listeners' && <Listeners  />}
+            {tab === 'loot'      && <Loot       />}
+            {tab === 'netmap'    && <NetworkMap  onOpenTerminal={openTerm} />}
+            {tab === 'generate'  && <Generate   />}
+            {tab === 'reports'   && <Reports    />}
+            {tab === 'ai'        && <AI         />}
+            {tab === 'settings'  && <Settings   />}
           </div>
 
-          {/* ── Terminal panel (slide up) ────────────────────────────── */}
+          {/* Terminal panel (slide up) */}
           {terminal && (
-            <div className="shrink-0 border-t border-primary/30" style={{ height: '38vh' }}>
+            <div style={{
+              flexShrink: 0,
+              height: '38vh',
+              borderTop: '1px solid rgba(185,28,28,.3)',
+              background: '#040404',
+            }}>
               <Terminal
                 sessionID={terminal.sessionID}
                 sessionName={terminal.sessionName}
@@ -355,51 +467,120 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Event log panel (slide up) ───────────────────────────── */}
-          {showEvents && (
-            <div className="shrink-0 border-t border-border bg-[#080812]" style={{ height: terminal ? '25vh' : '30vh' }}>
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-                <div className="flex items-center gap-2 text-[11px]">
-                  <Activity size={12} className="text-primary" />
-                  <span className="text-primary font-semibold">Event Log</span>
-                  <span className="text-muted">({events.length} events)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setEvents([])} className="text-muted hover:text-danger text-[10px]">Clear</button>
-                  <button onClick={() => setShowEvents(false)} className="text-muted hover:text-text">
-                    <X size={12} />
-                  </button>
-                </div>
+          {/* Event log panel (slide up) */}
+          {evOpen && (
+            <div ref={evRef} style={{
+              flexShrink: 0,
+              height: terminal ? '22vh' : '28vh',
+              borderTop: '1px solid #1e1e1e',
+              background: '#060606',
+              display: 'flex', flexDirection: 'column',
+              overflow: 'hidden',
+            }}>
+              {/* Header */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 14px', borderBottom: '1px solid #1a1a1a',
+                flexShrink: 0,
+              }}>
+                <Activity size={11} style={{ color: '#b91c1c' }} />
+                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: '#555' }}>
+                  Event Log
+                </span>
+                <span style={{ fontSize: 8, color: '#333' }}>({events.length})</span>
+                <div style={{ flex: 1 }} />
+                <button onClick={() => setEvents([])} style={{
+                  fontSize: 8.5, color: '#333', background: 'none', border: 'none', cursor: 'pointer',
+                }}>
+                  Clear
+                </button>
+                <button onClick={() => setEvOpen(false)} style={{
+                  color: '#333', background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                }}>
+                  <X size={11} />
+                </button>
               </div>
-              <div ref={evLogRef} className="overflow-y-auto h-[calc(100%-36px)] font-mono text-[11px]">
+              {/* Events */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '2px 0' }}>
                 {events.length === 0 ? (
-                  <div className="p-3 text-muted">No events yet — waiting for C2 activity…</div>
-                ) : (
-                  events.map(ev => (
-                    <div key={ev.id}
-                      className={`flex items-start gap-3 px-4 py-1.5 border-b border-border/20 hover:bg-white/3 ${
-                        ev.urgent ? 'bg-danger/5' : ''
-                      }`}>
-                      <span className="shrink-0 text-base leading-none mt-0.5">{ev.icon}</span>
-                      <span className="text-muted shrink-0 tabular-nums">
-                        {new Date(ev.ts).toLocaleTimeString()}
-                      </span>
-                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
-                        ev.urgent
-                          ? 'bg-danger/20 text-danger'
-                          : 'bg-border/40 text-muted'
-                      }`}>
-                        {ev.type}
-                      </span>
-                      <span className="text-text break-all">{ev.msg}</span>
-                      <span className="text-muted text-[9px] shrink-0 ml-auto">{tsAgo(ev.ts)}</span>
-                    </div>
-                  ))
-                )}
+                  <div style={{ padding: '12px 14px', fontSize: 9.5, color: '#2a2a2a' }}>
+                    No events yet — waiting for C2 activity…
+                  </div>
+                ) : events.map(ev => (
+                  <div key={ev.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '4px 14px',
+                    borderBottom: '1px solid rgba(255,255,255,.02)',
+                    background: ev.urgent ? 'rgba(185,28,28,.04)' : 'transparent',
+                  }}>
+                    <span style={{ fontSize: 12, lineHeight: 1, flexShrink: 0 }}>{ev.icon}</span>
+                    <span style={{ fontSize: 9, color: '#333', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                      {new Date(ev.ts).toLocaleTimeString()}
+                    </span>
+                    <span style={{
+                      fontSize: 7.5, padding: '1px 5px', borderRadius: 3,
+                      background: ev.urgent ? 'rgba(185,28,28,.15)' : 'rgba(255,255,255,.04)',
+                      color: ev.urgent ? '#ef4444' : '#333',
+                      border: `1px solid ${ev.urgent ? 'rgba(185,28,28,.25)' : '#1a1a1a'}`,
+                      flexShrink: 0, fontWeight: 700, letterSpacing: '.05em',
+                    }}>
+                      {ev.type}
+                    </span>
+                    <span style={{ fontSize: 9.5, color: '#555', flex: 1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                      {ev.msg}
+                    </span>
+                    <span style={{ fontSize: 8.5, color: '#2a2a2a', flexShrink: 0 }}>{ago(ev.ts)}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
         </div>
+
+        {/* ── Status bar (bottom, Cobalt Strike style) ── */}
+        <div style={{
+          height: 22,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 14px',
+          borderTop: '1px solid #161616',
+          background: '#060606',
+          flexShrink: 0,
+          fontSize: 8.5,
+          color: '#2e2e2e',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span style={{ color: '#1e1e1e' }}>SUDOSOC-C2 v2.0</span>
+            {stats?.uptime && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#2a2a2a' }}>
+                <Clock size={8} /> {stats.uptime}
+              </span>
+            )}
+            {stats && stats.operators > 0 && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#2a2a2a' }}>
+                <Users size={8} /> {stats.operators} operator{stats.operators > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{
+              color: wsStatus === 'connected' ? '#3a1a1a' : '#1e1e1e',
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              {wsStatus === 'connected' && (
+                <>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#b91c1c', animation: 'pulse 2s infinite' }} />
+                  C2 ONLINE
+                </>
+              )}
+              {wsStatus === 'disconnected' && '● OFFLINE'}
+              {wsStatus === 'connecting'   && '○ CONNECTING…'}
+            </span>
+            <span style={{ color: '#1a1a1a' }}>
+              For authorized security testing only
+            </span>
+          </div>
+        </div>
+
       </div>
     </div>
   )
