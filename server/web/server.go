@@ -101,6 +101,7 @@ func buildRouter() *mux.Router {
 	api.HandleFunc("/generate/pack",     handleGeneratePack).Methods(http.MethodPost)
 	api.HandleFunc("/generate/ghost",    handleGenerateGhost).Methods(http.MethodPost)
 	api.HandleFunc("/generate/stealth",  handleGenerateStealth).Methods(http.MethodPost)
+	api.HandleFunc("/generate/ps",       handleGeneratePS).Methods(http.MethodPost)
 
 	// ── Stage hosting (one-shot encrypted payload delivery) ──────────────
 	r.HandleFunc("/api/stage/{id}", handleStageDownload).Methods(http.MethodGet)

