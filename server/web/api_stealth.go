@@ -106,11 +106,15 @@ func handleStageDownload(w http.ResponseWriter, r *http.Request) {
 
 	entry, ok := generate.ConsumeStage(id)
 	if !ok {
-		http.NotFound(w, r) // already served or never existed
+		http.NotFound(w, r)
 		return
 	}
 
-	// Return raw encrypted bytes — no JSON wrapper
+	// Visible log in the server console so the operator knows the stage was fetched
+	fmt.Printf("\n[stage] 🔔 Stage %s downloaded by %s (%d KB)\n\n",
+		id[:8], r.RemoteAddr, len(entry.EncryptedData)/1024)
+
+	// Return raw encrypted bytes
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(entry.EncryptedData)))
 	w.WriteHeader(http.StatusOK)

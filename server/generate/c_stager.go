@@ -372,7 +372,7 @@ typedef HINTERNET(WINAPI*pfC)(HINTERNET,LPCWSTR,INTERNET_PORT,DWORD);
 typedef HINTERNET(WINAPI*pfOR)(HINTERNET,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR*,DWORD);
 typedef BOOL(WINAPI*pfSR)(HINTERNET,LPCWSTR,DWORD,LPVOID,DWORD,DWORD,DWORD_PTR);
 typedef BOOL(WINAPI*pfRR)(HINTERNET,LPVOID);
-typedef BOOL(WINAPI*pfQA)(HINTERNET,LPDWORD);
+/* pfQA unused — we use ReadData loop instead of QueryDataAvailable */
 typedef BOOL(WINAPI*pfRD)(HINTERNET,LPVOID,DWORD,LPDWORD);
 typedef BOOL(WINAPI*pfCH)(HINTERNET);
 typedef BOOL(WINAPI*pfSO)(HINTERNET,DWORD,LPVOID,DWORD);
@@ -386,11 +386,10 @@ static uint8_t* dl(const wchar_t *host,int port,const wchar_t *path,int tls,DWOR
     pfOR fOR=(pfOR)rp(hW,_WHOR,__LEN_WHOR__);
     pfSR fSR=(pfSR)rp(hW,_WHSR,__LEN_WHSR__);
     pfRR fRR=(pfRR)rp(hW,_WHRR,__LEN_WHRR__);
-    pfQA fQA=(pfQA)rp(hW,_WHQA,__LEN_WHQA__);
     pfRD fRD=(pfRD)rp(hW,_WHRD,__LEN_WHRD__);
     pfCH fCH=(pfCH)rp(hW,_WHCH,__LEN_WHCH__);
     pfSO fSO=(pfSO)rp(hW,_WHSO,__LEN_WHSO__);
-    if(!fO||!fC||!fOR||!fSR||!fRR||!fQA||!fRD||!fCH)return NULL;
+    if(!fO||!fC||!fOR||!fSR||!fRR||!fRD||!fCH)return NULL;
 
     HINTERNET hS=fO(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                     WINHTTP_ACCESS_TYPE_NO_PROXY,NULL,NULL,0);
@@ -408,14 +407,26 @@ static uint8_t* dl(const wchar_t *host,int port,const wchar_t *path,int tls,DWOR
     }
     if(!fSR(hReq,NULL,0,NULL,0,0,0)||!fRR(hReq,NULL)){
         fCH(hReq);fCH(hConn);fCH(hS);return NULL;}
-    DWORD cap=8<<20,tot=0,av=0,rd=0;
+    /* Read in 64 KB chunks until WinHttpReadData returns 0 bytes (EOF).
+       Using ReadData directly avoids QueryDataAvailable returning 0
+       between chunks for large responses. */
+    DWORD cap=8<<20, tot=0;
     uint8_t *buf=(uint8_t*)HeapAlloc(GetProcessHeap(),0,cap);
     if(!buf){fCH(hReq);fCH(hConn);fCH(hS);return NULL;}
-    while(fQA(hReq,&av)&&av>0){
-        if(tot+av>cap){cap=(tot+av)*2;
-            uint8_t *nb=(uint8_t*)HeapReAlloc(GetProcessHeap(),0,buf,cap);
-            if(!nb)break; buf=nb;}
-        fRD(hReq,buf+tot,av,&rd);tot+=rd;}
+    uint8_t chunk[65536];
+    DWORD rd=0;
+    for(;;){
+        rd=0;
+        if(!fRD(hReq,chunk,sizeof(chunk),&rd)||rd==0) break;
+        if(tot+rd>cap){
+            DWORD nc=(cap*2>tot+rd+65536)?cap*2:tot+rd+65536;
+            uint8_t *nb=(uint8_t*)HeapReAlloc(GetProcessHeap(),0,buf,nc);
+            if(!nb) break;
+            buf=nb; cap=nc;
+        }
+        memcpy(buf+tot,chunk,rd);
+        tot+=rd;
+    }
     fCH(hReq);fCH(hConn);fCH(hS);
     *olen=tot;return buf;
 }
