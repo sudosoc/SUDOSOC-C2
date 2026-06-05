@@ -173,13 +173,17 @@ func RegisterStage(id string, data, key []byte) {
 	stageStore[id] = &CStageEntry{ID: id, EncryptedData: data, Key: key}
 }
 
-// ConsumeStage returns the encrypted stage data and deletes it (one-shot).
+// ConsumeStage returns the encrypted stage data.
+// The stage stays alive for multiple downloads — it is NOT deleted on first access.
+// Call DeleteStage(id) manually if you want to revoke it.
 func ConsumeStage(id string) (*CStageEntry, bool) {
 	e, ok := stageStore[id]
-	if ok {
-		delete(stageStore, id)
-	}
 	return e, ok
+}
+
+// DeleteStage removes a stage from the store.
+func DeleteStage(id string) {
+	delete(stageStore, id)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
